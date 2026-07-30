@@ -171,6 +171,7 @@ main/xiaozhi-server/models/sherpa-onnx*
 /main/xiaozhi-server/asr-models/iic/SenseVoiceSmall/
 /models/SenseVoiceSmall/model.pt
 my_wakeup_words.mp3
+main/xiaozhi-server/config/assets/wakeup_words/
 !main/xiaozhi-server/config/assets/bind_code.wav
 !main/xiaozhi-server/config/assets/wakeup_words.wav
 !main/xiaozhi-server/config/assets/bind_not_found.wav
