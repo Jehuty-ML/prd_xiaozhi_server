@@ -22,7 +22,10 @@ async def handleAudioMessage(conn: "ConnectionHandler", pcm_frame):
         have_voice = False
         # 设置一个短暂延迟后恢复VAD检测
         if not hasattr(conn, "vad_resume_task") or conn.vad_resume_task.done():
-            conn.vad_resume_task = asyncio.create_task(resume_vad_detection(conn))
+            if hasattr(conn, "spawn_task"):
+                conn.vad_resume_task = conn.spawn_task(resume_vad_detection(conn))
+            else:
+                conn.vad_resume_task = asyncio.create_task(resume_vad_detection(conn))
         return
     # 服务端AEC功能需要实时触发打断
     if conn.client_aec and have_voice:

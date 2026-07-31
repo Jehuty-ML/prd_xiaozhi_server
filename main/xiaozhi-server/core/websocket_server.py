@@ -31,6 +31,11 @@ _setup_websockets_logger()
 
 
 from core.connection import ConnectionHandler
+from core.connection_registry import (
+    ConnectionLimits,
+    ConnectionRegistry,
+    ConnectionRejected,
+)
 from config.config_loader import get_config_from_api_async
 from core.auth import AuthManager, AuthenticationError
 from core.utils.modules_initialize import initialize_modules
@@ -67,6 +72,14 @@ class WebSocketServer:
         secret_key = self.config["server"]["auth_key"]
         expire_seconds = auth_config.get("expire_seconds", None)
         self.auth = AuthManager(secret_key=secret_key, expire_seconds=expire_seconds)
+
+        self.connection_limits = ConnectionLimits.from_config(self.config["server"])
+        self.connection_registry = ConnectionRegistry(self.connection_limits)
+        self.logger.bind(tag=TAG).info(
+            f"连接硬上限: max={self.connection_limits.max_connections}, "
+            f"per_device={self.connection_limits.max_connections_per_device}, "
+            f"report_queue={self.connection_limits.report_queue_maxsize}"
+        )
 
     async def start(self):
         server_config = self.config["server"]
@@ -113,7 +126,8 @@ class WebSocketServer:
             await websocket.send("认证失败")
             await websocket.close()
             return
-        # 创建ConnectionHandler时传入当前server实例
+
+        device_id = dict(websocket.request.headers).get("device-id")
         handler = ConnectionHandler(
             self.config,
             self._vad,
@@ -123,11 +137,31 @@ class WebSocketServer:
             self._intent,
             self,  # 传入server实例
         )
+        acquired = False
         try:
+            await self.connection_registry.try_acquire(handler.session_id, device_id)
+            acquired = True
+            self.logger.bind(tag=TAG).info(
+                f"连接准入通过 device={device_id} session={handler.session_id} "
+                f"active={self.connection_registry.active_count}/"
+                f"{self.connection_limits.max_connections}"
+            )
             await handler.handle_connection(websocket)
+        except ConnectionRejected as e:
+            self.logger.bind(tag=TAG).warning(
+                f"连接被拒绝 device={device_id}: {e.reason} "
+                f"active={self.connection_registry.active_count}"
+            )
+            try:
+                # websockets reason 最长 123 字节
+                await websocket.close(code=e.close_code, reason=e.reason[:120])
+            except Exception:
+                pass
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"处理连接时出错: {e}")
         finally:
+            if acquired:
+                await self.connection_registry.release(handler.session_id)
             # 强制关闭连接（如果还没有关闭的话）
             try:
                 # 安全地检查WebSocket状态并关闭
@@ -149,8 +183,13 @@ class WebSocketServer:
             # 如果是 WebSocket 请求，返回 None 允许握手继续
             return None
         else:
-            # 如果是普通 HTTP 请求，返回 "server is running"
-            return websocket.respond(200, "Server is running\n")
+            # 如果是普通 HTTP 请求，返回运行状态与连接水位
+            body = (
+                "Server is running\n"
+                f"active_connections={self.connection_registry.active_count}\n"
+                f"max_connections={self.connection_limits.max_connections}\n"
+            )
+            return websocket.respond(200, body)
 
     async def update_config(self) -> bool:
         """更新服务器配置并重新初始化组件
@@ -174,6 +213,11 @@ class WebSocketServer:
                 )
                 # 更新配置
                 self.config = new_config
+                # 同步连接硬上限（不影响已建立连接）
+                self.connection_limits = ConnectionLimits.from_config(
+                    self.config["server"]
+                )
+                self.connection_registry.limits = self.connection_limits
                 # 重新初始化组件
                 modules = initialize_modules(
                     self.logger,
