@@ -43,9 +43,16 @@ from config.logger import setup_logging, build_module_string, create_connection_
 from config.manage_api_client import DeviceNotFoundException, DeviceBindException, generate_and_save_chat_title
 from core.utils.prompt_manager import PromptManager
 from core.utils.voiceprint_provider import VoiceprintProvider
-from core.utils.util import get_system_error_response
 from core.utils import textUtils
 from core.utils import metrics as metrics_mod
+from core.utils.resilience import (
+    UpstreamKind,
+    classify_exception,
+    enqueue_chat_degradation,
+    get_circuit,
+    get_fallback_text,
+    get_resilience_settings,
+)
 
 
 TAG = __name__
@@ -1169,7 +1176,22 @@ class ConnectionHandler:
                 0.0,
                 status="error",
             )
+            kind = classify_exception(e)
+            settings = get_resilience_settings(self.config)
+            if settings.enabled:
+                get_circuit(
+                    f"llm:{metrics_mod.provider_name_from_obj(self.llm)}", settings
+                ).record_failure()
             self.logger.bind(tag=TAG).error(f"LLM 处理出错 {query}: {e}")
+            # FIRST 已入队（depth==0）：补降级话术 + LAST，避免设备卡在 speaking
+            if current_sentence_id:
+                enqueue_chat_degradation(
+                    self,
+                    current_sentence_id,
+                    "llm",
+                    kind,
+                    ensure_last=(depth == 0),
+                )
             return None
 
         # 处理流式响应
@@ -1252,23 +1274,18 @@ class ConnectionHandler:
                         )
         except Exception as e:
             llm_status = "error"
+            kind = classify_exception(e)
+            settings = get_resilience_settings(self.config)
+            if settings.enabled:
+                get_circuit(f"llm:{llm_provider}", settings).record_failure()
             self.logger.bind(tag=TAG).error(f"LLM stream processing error: {e}")
-            self.tts.tts_text_queue.put(
-                TTSMessageDTO(
-                    sentence_id=current_sentence_id,
-                    sentence_type=SentenceType.MIDDLE,
-                    content_type=ContentType.TEXT,
-                    content_detail=get_system_error_response(self.config),
-                )
+            enqueue_chat_degradation(
+                self,
+                current_sentence_id,
+                "llm",
+                kind,
+                ensure_last=(depth == 0),
             )
-            if depth == 0:
-                self.tts.tts_text_queue.put(
-                    TTSMessageDTO(
-                        sentence_id=current_sentence_id,
-                        sentence_type=SentenceType.LAST,
-                        content_type=ContentType.ACTION,
-                    )
-                )
             metrics_mod.observe_provider(
                 "llm",
                 llm_provider,
@@ -1284,6 +1301,11 @@ class ConnectionHandler:
             status=llm_status,
             ttfb=llm_ttfb,
         )
+        # 成功时复位熔断
+        if llm_status == "ok":
+            settings = get_resilience_settings(self.config)
+            if settings.enabled:
+                get_circuit(f"llm:{llm_provider}", settings).record_success()
         # 处理function call
         if tool_call_flag:
             bHasError = False
@@ -1407,8 +1429,11 @@ class ConnectionHandler:
                             f"工具调用超时或异常: {tool_call_data['name']}, 错误: {e}"
                         )
                         # 超时时返回错误响应，避免整个流程卡死
+                        tool_msg = get_fallback_text(
+                            self.config, "tool", UpstreamKind.TIMEOUT
+                        )
                         tool_results.append((
-                            ActionResponse(action=Action.ERROR, result="哎呀，网络遇到点问题，请稍后再试下！"),
+                            ActionResponse(action=Action.ERROR, result=tool_msg),
                             tool_call_data
                         ))
                         # 上报工具调用错误
