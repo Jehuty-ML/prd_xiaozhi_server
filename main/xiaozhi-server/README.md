@@ -57,24 +57,26 @@
 
 ### 4.2 配置项
 
-写在 `config.yaml` 的 `server.connection`：
+#### 本地模式（无智控台）
 
-```yaml
-server:
-  connection:
-    # 单进程最大并发 WebSocket 连接数
-    max_connections: 500
-    # 同一 device-id 最大并发连接数（ESP 设备通常 1～2）
-    max_connections_per_device: 2
-    # 聊天上报队列上限，满则丢弃新上报，避免内存膨胀
-    report_queue_maxsize: 100
-    # 连接清理等待超时（秒）
-    cleanup_timeout_seconds: 10
-```
+写在 `data/.config.yaml` 的 `server.connection`。
 
-未配置时使用上述默认值（见 `ConnectionLimits.from_config`）。
+#### 智控台模式（manager-api）
 
-若使用智控台 / `manager-api` 下发配置，请在对应服务端配置中同步这些字段，否则可能仍走默认值。
+参数写入 `sys_params`，在【参数管理】可改：
+
+| param_code | 默认 | 说明 |
+|------------|------|------|
+| `server.connection.max_connections` | 500 | 单进程最大 WS 连接数 |
+| `server.connection.max_connections_per_device` | 2 | 同 device-id 上限 |
+| `server.connection.report_queue_maxsize` | 100 | 上报队列上限 |
+| `server.connection.cleanup_timeout_seconds` | 10 | 清理超时（秒） |
+
+切换：用 `data/.config.yaml.remote.bak` 覆盖为 `data/.config.yaml`，填 `manager-api.url` / `secret`，重启 manager-api（执行 Liquibase）与 xiaozhi-server。  
+改参后可在【服务端管理】点「更新配置」；新上限对后续新连接生效。  
+优先级：`config.yaml` 默认 < 智控台 API < `data/.config.yaml` 显式覆盖。
+
+未配置时使用默认值（见 `ConnectionLimits.from_config`）。
 
 ### 4.3 行为说明
 

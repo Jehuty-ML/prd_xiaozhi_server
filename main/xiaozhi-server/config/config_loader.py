@@ -58,8 +58,13 @@ async def get_config_from_api_async(config, default_local_server=None):
     """从Java API获取配置（异步版本）
 
     Args:
-        config: 本地自定义配置（通常来自 data/.config.yaml）
-        default_local_server: 默认 config.yaml 中的 server 段，用于保留 connection 等本地字段
+        config: 本地自定义配置（通常来自 data/.config.yaml，含 manager-api）
+        default_local_server: 默认 config.yaml 中的 server 段（作兜底）
+
+    合并规则：
+    - 监听地址（ip/port/http_port/vision_explain/auth_key）始终以本地为准（进程绑定）
+    - server.connection：默认 YAML < 智控台 API < data/.config.yaml 显式覆盖
+    - server.auth.enabled：以 API 为准
     """
     # 初始化API客户端
     init_service(config)
@@ -74,40 +79,89 @@ async def get_config_from_api_async(config, default_local_server=None):
         "url": config["manager-api"].get("url", ""),
         "secret": config["manager-api"].get("secret", ""),
     }
-    auth_enabled = config_data.get("server", {}).get("auth", {}).get("enabled", False)
-    # server的配置以本地为准（含连接硬上限）
-    # 优先 data/.config.yaml，其次默认 config.yaml
-    local_server = {}
-    if default_local_server:
-        local_server.update(default_local_server)
-    if config.get("server"):
-        local_server.update(config["server"])
 
-    if local_server:
-        config_data["server"] = {
-            "ip": local_server.get("ip", ""),
-            "port": local_server.get("port", ""),
-            "http_port": local_server.get("http_port", ""),
-            "vision_explain": local_server.get("vision_explain", ""),
-            "auth_key": local_server.get("auth_key", ""),
-        }
-        if local_server.get("connection"):
-            config_data["server"]["connection"] = local_server["connection"]
-        if local_server.get("metrics"):
-            config_data["server"]["metrics"] = local_server["metrics"]
-        if local_server.get("mqtt_gateway") is not None:
-            config_data["server"]["mqtt_gateway"] = local_server.get("mqtt_gateway")
-        if local_server.get("mqtt_signature_key") is not None:
-            config_data["server"]["mqtt_signature_key"] = local_server.get(
-                "mqtt_signature_key"
-            )
-        if local_server.get("udp_gateway") is not None:
-            config_data["server"]["udp_gateway"] = local_server.get("udp_gateway")
-    config_data["server"]["auth"] = {"enabled": auth_enabled}
+    api_server = config_data.get("server") or {}
+    if not isinstance(api_server, dict):
+        api_server = {}
+    auth_enabled = (api_server.get("auth") or {}).get("enabled", False)
+
+    custom_server = config.get("server") or {}
+    if not isinstance(custom_server, dict):
+        custom_server = {}
+    default_server = default_local_server or {}
+    if not isinstance(default_server, dict):
+        default_server = {}
+
+    # 监听相关：本地优先（进程实际绑定地址）
+    bind_server = {}
+    bind_server.update(default_server)
+    bind_server.update(custom_server)
+
+    merged_server = {
+        "ip": bind_server.get("ip", "0.0.0.0"),
+        "port": bind_server.get("port", 8000),
+        "http_port": bind_server.get("http_port", 8003),
+        "vision_explain": bind_server.get("vision_explain", ""),
+        "auth_key": bind_server.get("auth_key", ""),
+        "auth": {"enabled": auth_enabled},
+    }
+
+    # 保留 API 下发的网关类字段；本地显式配置可覆盖
+    for key in (
+        "websocket",
+        "ota",
+        "mcp_endpoint",
+        "mqtt_gateway",
+        "mqtt_signature_key",
+        "udp_gateway",
+        "mqtt_manager_api",
+    ):
+        if api_server.get(key) is not None:
+            merged_server[key] = api_server.get(key)
+        if key in custom_server:
+            merged_server[key] = custom_server.get(key)
+
+    # connection：默认 < API < 本地 data/.config.yaml 显式覆盖
+    merged_connection = {}
+    if isinstance(default_server.get("connection"), dict):
+        merged_connection.update(default_server["connection"])
+    if isinstance(api_server.get("connection"), dict):
+        merged_connection.update(api_server["connection"])
+    if isinstance(custom_server.get("connection"), dict):
+        merged_connection.update(custom_server["connection"])
+    if merged_connection:
+        merged_server["connection"] = merged_connection
+
+    # metrics：同样支持 API 下发，本地可覆盖
+    merged_metrics = {}
+    if isinstance(default_server.get("metrics"), dict):
+        merged_metrics.update(default_server["metrics"])
+    if isinstance(api_server.get("metrics"), dict):
+        merged_metrics.update(api_server["metrics"])
+    if isinstance(custom_server.get("metrics"), dict):
+        merged_metrics.update(custom_server["metrics"])
+    if merged_metrics:
+        merged_server["metrics"] = merged_metrics
+
+    config_data["server"] = merged_server
+
     # 如果服务器没有prompt_template，则从本地配置读取
     if not config_data.get("prompt_template"):
         config_data["prompt_template"] = config.get("prompt_template")
     return config_data
+
+
+async def reload_config_from_api():
+    """热更新：重新读取本地 YAML + 拉取智控台配置。"""
+    default_config_path = get_project_dir() + "config.yaml"
+    custom_config_path = get_project_dir() + "data/.config.yaml"
+    default_config = read_config(default_config_path)
+    custom_config = read_config(custom_config_path)
+    if not custom_config.get("manager-api", {}).get("url"):
+        raise RuntimeError("当前未配置 manager-api，无法从智控台热更新")
+    return await get_config_from_api_async(
+        custom_config, default_local_server=default_config.get("server")
+    )
 
 
 async def get_private_config_from_api(config, device_id, client_id):

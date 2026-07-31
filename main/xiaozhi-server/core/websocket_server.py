@@ -36,7 +36,7 @@ from core.connection_registry import (
     ConnectionRegistry,
     ConnectionRejected,
 )
-from config.config_loader import get_config_from_api_async
+from config.config_loader import get_config_from_api_async, reload_config_from_api
 from core.auth import AuthManager, AuthenticationError
 from core.utils.modules_initialize import initialize_modules
 from core.utils.util import check_vad_update, check_asr_update
@@ -211,12 +211,20 @@ class WebSocketServer:
         """
         try:
             async with self.config_lock:
-                # 重新获取配置（使用异步版本）
-                new_config = await get_config_from_api_async(self.config)
+                # 重新读取 data/.config.yaml + 拉取智控台，避免沿用内存里的旧 connection
+                try:
+                    new_config = await reload_config_from_api()
+                except RuntimeError:
+                    new_config = await get_config_from_api_async(self.config)
                 if new_config is None:
                     self.logger.bind(tag=TAG).error("获取新配置失败")
                     return False
                 self.logger.bind(tag=TAG).info(f"获取新配置成功")
+                conn_cfg = (new_config.get("server") or {}).get("connection") or {}
+                self.logger.bind(tag=TAG).info(
+                    f"连接硬上限将更新为: max={conn_cfg.get('max_connections')}, "
+                    f"per_device={conn_cfg.get('max_connections_per_device')}"
+                )
                 # 检查 VAD 和 ASR 类型是否需要更新
                 update_vad = check_vad_update(self.config, new_config)
                 update_asr = check_asr_update(self.config, new_config)
