@@ -9,6 +9,8 @@ import asyncio
 from dataclasses import dataclass
 from typing import Dict, Optional, Set
 
+from core.utils import metrics as metrics_mod
+
 
 @dataclass(frozen=True)
 class ConnectionLimits:
@@ -67,6 +69,9 @@ class ConnectionRegistry:
                 return
 
             if self.active_count >= self.limits.max_connections:
+                metrics_mod.observe_ws_rejected(
+                    f"server at capacity ({self.limits.max_connections})"
+                )
                 raise ConnectionRejected(
                     f"server at capacity ({self.limits.max_connections})"
                 )
@@ -76,6 +81,9 @@ class ConnectionRegistry:
                 device_sessions is not None
                 and len(device_sessions) >= self.limits.max_connections_per_device
             ):
+                metrics_mod.observe_ws_rejected(
+                    f"device connection limit ({self.limits.max_connections_per_device})"
+                )
                 raise ConnectionRejected(
                     f"device connection limit ({self.limits.max_connections_per_device})"
                 )
@@ -85,6 +93,8 @@ class ConnectionRegistry:
                 self._by_device[normalized_device] = {session_id}
             else:
                 device_sessions.add(session_id)
+            metrics_mod.observe_ws_opened()
+            metrics_mod.set_ws_active(self.active_count)
 
     async def release(self, session_id: str) -> None:
         """释放连接名额；幂等。"""
@@ -98,3 +108,4 @@ class ConnectionRegistry:
             device_sessions.discard(session_id)
             if not device_sessions:
                 self._by_device.pop(device_id, None)
+            metrics_mod.set_ws_active(self.active_count)

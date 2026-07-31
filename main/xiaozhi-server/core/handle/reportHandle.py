@@ -31,6 +31,12 @@ def _enqueue_report(conn: "ConnectionHandler", item) -> bool:
         return False
     try:
         conn.report_queue.put_nowait(item)
+        try:
+            from core.utils import metrics as metrics_mod
+
+            metrics_mod.set_queue_depth("report", conn.report_queue.qsize())
+        except Exception:
+            pass
         return True
     except queue.Full:
         conn.logger.bind(tag=TAG).warning(

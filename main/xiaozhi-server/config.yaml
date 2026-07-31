@@ -42,6 +42,7 @@ server:
   # UDP网关配置
   udp_gateway: null
   # 连接硬上限（生产建议按机器规格调整）
+  # 本地覆盖请改 data/.config.yaml 同名段，不要只改本文件
   connection:
     # 单进程最大并发 WebSocket 连接数
     max_connections: 500
@@ -51,6 +52,10 @@ server:
     report_queue_maxsize: 100
     # 连接清理等待超时（秒）
     cleanup_timeout_seconds: 10
+  # Prometheus 指标（挂在 http_port，默认 /metrics）
+  metrics:
+    enabled: true
+    path: /metrics
 log:
   # 设置控制台输出的日志格式，时间、日志级别、标签、消息
   log_format: "<green>{time:YYMMDD HH:mm:ss}</green>[{version}_{selected_module}][<light-blue>{extra[tag]}</light-blue>]-<level>{level}</level>-<light-green>{message}</light-green>"

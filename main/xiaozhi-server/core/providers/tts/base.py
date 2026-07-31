@@ -1,6 +1,7 @@
 import os
 import re
 import uuid
+import time
 import queue
 import asyncio
 import threading
@@ -191,71 +192,96 @@ class TTSProviderBase(ABC):
                 return None
     
     def to_tts(self, text):
+        from core.utils import metrics as metrics_mod
+
         # 保留原始文本用于日志/显示
         original_text = text
         text = MarkdownCleaner.clean_markdown(text)
         if self._correct_words_pattern:
             text = self._correct_words_pattern.sub(lambda m: self.correct_words[m.group(0)], text)
         max_repeat_time = 5
-        if self.delete_audio_file:
-            # 需要删除文件的直接转为音频数据
-            while max_repeat_time > 0:
-                try:
-                    audio_bytes = asyncio.run(self.text_to_speak(text, None))
-                    if audio_bytes:
-                        audio_datas = []
-                        audio_bytes_to_data_stream(
-                            audio_bytes,
-                            file_type=self.audio_file_type,
-                            is_opus=True,
-                            callback=lambda data: audio_datas.append(data),
-                            sample_rate=self.conn.sample_rate,
-                        )
-                        return audio_datas
-                    else:
-                        max_repeat_time -= 1
-                except Exception as e:
-                    logger.bind(tag=TAG).warning(
-                        f"语音生成失败{5 - max_repeat_time + 1}次: {original_text}，错误: {e}"
-                    )
-                    max_repeat_time -= 1
-            if max_repeat_time > 0:
-                logger.bind(tag=TAG).info(
-                    f"语音生成成功: {original_text}，重试{5 - max_repeat_time}次"
-                )
-            else:
-                logger.bind(tag=TAG).error(
-                    f"语音生成失败: {original_text}，请检查网络或服务是否正常"
-                )
-            return None
-        else:
-            tmp_file = self.generate_filename()
-            try:
-                while not os.path.exists(tmp_file) and max_repeat_time > 0:
+        provider = metrics_mod.provider_name_from_obj(self)
+        t0 = time.perf_counter()
+        status = "error"
+        result = None
+        try:
+            if self.delete_audio_file:
+                # 需要删除文件的直接转为音频数据
+                while max_repeat_time > 0:
                     try:
-                        asyncio.run(self.text_to_speak(text, tmp_file))
+                        audio_bytes = asyncio.run(self.text_to_speak(text, None))
+                        if audio_bytes:
+                            audio_datas = []
+                            audio_bytes_to_data_stream(
+                                audio_bytes,
+                                file_type=self.audio_file_type,
+                                is_opus=True,
+                                callback=lambda data: audio_datas.append(data),
+                                sample_rate=self.conn.sample_rate,
+                            )
+                            status = "ok"
+                            result = audio_datas
+                            break
+                        else:
+                            max_repeat_time -= 1
                     except Exception as e:
                         logger.bind(tag=TAG).warning(
                             f"语音生成失败{5 - max_repeat_time + 1}次: {original_text}，错误: {e}"
                         )
-                        # 未执行成功，删除文件
-                        if os.path.exists(tmp_file):
-                            os.remove(tmp_file)
                         max_repeat_time -= 1
-
-                if max_repeat_time > 0:
+                if status == "ok":
                     logger.bind(tag=TAG).info(
-                        f"语音生成成功: {original_text}:{tmp_file}，重试{5 - max_repeat_time}次"
+                        f"语音生成成功: {original_text}，重试{5 - max_repeat_time}次"
                     )
                 else:
                     logger.bind(tag=TAG).error(
                         f"语音生成失败: {original_text}，请检查网络或服务是否正常"
                     )
+                return result
+            else:
+                tmp_file = self.generate_filename()
+                try:
+                    while not os.path.exists(tmp_file) and max_repeat_time > 0:
+                        try:
+                            asyncio.run(self.text_to_speak(text, tmp_file))
+                        except Exception as e:
+                            logger.bind(tag=TAG).warning(
+                                f"语音生成失败{5 - max_repeat_time + 1}次: {original_text}，错误: {e}"
+                            )
+                            # 未执行成功，删除文件
+                            if os.path.exists(tmp_file):
+                                os.remove(tmp_file)
+                            max_repeat_time -= 1
 
-                return tmp_file
-            except Exception as e:
-                logger.bind(tag=TAG).error(f"Failed to generate TTS file: {e}")
-                return None
+                    if max_repeat_time > 0:
+                        logger.bind(tag=TAG).info(
+                            f"语音生成成功: {original_text}:{tmp_file}，重试{5 - max_repeat_time}次"
+                        )
+                        status = "ok"
+                        result = tmp_file
+                    else:
+                        logger.bind(tag=TAG).error(
+                            f"语音生成失败: {original_text}，请检查网络或服务是否正常"
+                        )
+
+                    return result
+                except Exception as e:
+                    logger.bind(tag=TAG).error(f"Failed to generate TTS file: {e}")
+                    return None
+        finally:
+            metrics_mod.observe_provider(
+                "tts", provider, time.perf_counter() - t0, status=status
+            )
+            try:
+                if self.conn and getattr(self.conn, "tts", None) is self:
+                    metrics_mod.set_queue_depth(
+                        "tts_text", self.tts_text_queue.qsize()
+                    )
+                    metrics_mod.set_queue_depth(
+                        "tts_audio", self.tts_audio_queue.qsize()
+                    )
+            except Exception:
+                pass
 
     @abstractmethod
     async def text_to_speak(self, text, output_file):

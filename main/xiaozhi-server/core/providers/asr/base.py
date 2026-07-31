@@ -268,8 +268,13 @@ class ASRProviderBase(ABC):
     async def speech_to_text_wrapper(
         self, pcm_data: List[bytes], session_id: str
     ) -> Tuple[Optional[str], Optional[str]]:
+        from core.utils import metrics as metrics_mod
+
         file_path = None
         temp_path = None
+        provider = metrics_mod.provider_name_from_obj(self)
+        t0 = time.perf_counter()
+        status = "ok"
         try:
             combined_pcm_data = b"".join(pcm_data)
 
@@ -298,14 +303,21 @@ class ASRProviderBase(ABC):
             text, _ = await self.speech_to_text(
                 pcm_data, session_id, artifacts
             )
+            if not text:
+                status = "empty"
             return text, file_path
         except OSError as e:
+            status = "error"
             logger.bind(tag=TAG).error(f"文件操作错误: {e}")
             return None, None
         except Exception as e:
+            status = "error"
             logger.bind(tag=TAG).error(f"语音识别失败: {e}")
             return None, None
         finally:
+            metrics_mod.observe_provider(
+                "asr", provider, time.perf_counter() - t0, status=status
+            )
             try:
                 if temp_path and os.path.exists(temp_path):
                     os.unlink(temp_path)
