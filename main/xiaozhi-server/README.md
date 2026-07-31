@@ -71,6 +71,8 @@
 | `server.connection.max_connections_per_device` | 2 | 同 device-id 上限 |
 | `server.connection.report_queue_maxsize` | 100 | 上报队列上限 |
 | `server.connection.cleanup_timeout_seconds` | 10 | 清理超时（秒） |
+| `server.metrics.enabled` | true | 是否启用 Prometheus `/metrics` |
+| `server.metrics.path` | /metrics | 指标路径（挂在 http_port） |
 
 切换：用 `data/.config.yaml.remote.bak` 覆盖为 `data/.config.yaml`，填 `manager-api.url` / `secret`，重启 manager-api（执行 Liquibase）与 xiaozhi-server。  
 改参后可在【服务端管理】点「更新配置」；新上限对后续新连接生效。  
