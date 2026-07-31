@@ -41,6 +41,16 @@ server:
   mqtt_signature_key: null
   # UDP网关配置
   udp_gateway: null
+  # 连接硬上限（生产建议按机器规格调整）
+  connection:
+    # 单进程最大并发 WebSocket 连接数
+    max_connections: 500
+    # 同一 device-id 最大并发连接数（ESP 设备通常 1～2）
+    max_connections_per_device: 2
+    # 聊天上报队列上限，满则丢弃新上报避免内存膨胀
+    report_queue_maxsize: 100
+    # 连接清理等待超时（秒）
+    cleanup_timeout_seconds: 10
 log:
   # 设置控制台输出的日志格式，时间、日志级别、标签、消息
   log_format: "<green>{time:YYMMDD HH:mm:ss}</green>[{version}_{selected_module}][<light-blue>{extra[tag]}</light-blue>]-<level>{level}</level>-<light-green>{message}</light-green>"

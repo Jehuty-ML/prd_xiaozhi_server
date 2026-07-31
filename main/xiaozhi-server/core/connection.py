@@ -123,12 +123,24 @@ class ConnectionHandler:
         self.stop_event = threading.Event()
         self.executor = ThreadPoolExecutor(max_workers=5)
 
-        # 添加上报线程池
-        self.report_queue = queue.Queue()
+        # 添加上报线程池（有界队列，防止上报积压拖垮内存）
+        connection_cfg = (self.config.get("server") or {}).get("connection") or {}
+        self._cleanup_timeout_seconds = float(
+            connection_cfg.get("cleanup_timeout_seconds", 10.0)
+        )
+        report_queue_maxsize = int(connection_cfg.get("report_queue_maxsize", 100))
+        self.report_queue = queue.Queue(maxsize=max(1, report_queue_maxsize))
         self.report_thread = None
         # 未来可以通过修改此处，调节asr的上报和tts的上报，目前默认都开启
         self.report_asr_enable = self.read_config_from_api
         self.report_tts_enable = self.read_config_from_api
+
+        # 连接生命周期：幂等关闭 + 会话级任务跟踪
+        self._closed = False
+        self._closing = False
+        self._tracked_tasks: set = set()
+        self._background_init_task = None
+        self._aec_cache_cleanup_task = None
 
         # 依赖的组件
         self.vad = None
@@ -234,10 +246,12 @@ class ConnectionHandler:
             self.last_activity_time = time.time() * 1000
 
             # 启动超时检查任务
-            self.timeout_task = asyncio.create_task(self._check_timeout())
+            self.timeout_task = self.spawn_task(self._check_timeout())
 
             # 启动AEC缓存清理任务
-            self._aec_cache_cleanup_task = asyncio.create_task(self._check_aec_cache_expiry())
+            self._aec_cache_cleanup_task = self.spawn_task(
+                self._check_aec_cache_expiry()
+            )
 
             self.welcome_msg = self.config["xiaozhi"]
             self.welcome_msg["session_id"] = self.session_id
@@ -247,7 +261,7 @@ class ConnectionHandler:
             self.logger.bind(tag=TAG).info(f"配置输出音频采样率为: {self.sample_rate}")
 
             # 在后台初始化配置和组件（完全不阻塞主循环）
-            asyncio.create_task(self._background_initialize())
+            self._background_init_task = self.spawn_task(self._background_initialize())
 
             try:
                 async for message in self.websocket:
@@ -340,7 +354,31 @@ class ConnectionHandler:
             # 复用现有的绑定提示逻辑
             from core.handle.receiveAudioHandle import check_bind_device
 
-            asyncio.create_task(check_bind_device(self))
+            self.spawn_task(check_bind_device(self))
+
+    def spawn_task(self, coro):
+        """创建并登记会话级任务，关闭时统一取消。"""
+        if self._closed or self._closing or self.stop_event.is_set():
+            # 连接已在关闭流程中，不再拉起新任务
+            if asyncio.iscoroutine(coro):
+                coro.close()
+            return None
+
+        task = asyncio.create_task(coro)
+        self._tracked_tasks.add(task)
+
+        def _on_done(t: asyncio.Task):
+            self._tracked_tasks.discard(t)
+            if t.cancelled():
+                return
+            exc = t.exception()
+            if exc is not None:
+                self.logger.bind(tag=TAG).debug(
+                    f"会话任务结束异常: {type(exc).__name__}: {exc}"
+                )
+
+        task.add_done_callback(_on_done)
+        return task
 
     async def _route_message(self, message):
         """消息路由"""
@@ -1519,151 +1557,224 @@ class ConnectionHandler:
         self.client_is_speaking = False
         self.logger.bind(tag=TAG).debug(f"清除服务端讲话状态")
 
-    async def close(self, ws=None):
-        """资源清理方法"""
-        try:
-            # 清理 VAD 连接资源
+    async def _cancel_tracked_tasks(self):
+        """取消并等待本会话登记的全部 asyncio 任务。"""
+        current = asyncio.current_task()
+        tasks = [
+            t
+            for t in list(self._tracked_tasks)
+            if t and not t.done() and t is not current
+        ]
+        # 兼容未走 spawn_task 的旧字段
+        for t in (
+            self.timeout_task,
+            self._aec_cache_cleanup_task,
+            self._background_init_task,
+        ):
+            if t and not t.done() and t is not current and t not in tasks:
+                tasks.append(t)
+        if hasattr(self, "vad_resume_task") and self.vad_resume_task:
             if (
-                    hasattr(self, "vad")
-                    and self.vad
-                    and hasattr(self.vad, "release_conn_resources")
+                not self.vad_resume_task.done()
+                and self.vad_resume_task is not current
+                and self.vad_resume_task not in tasks
             ):
-                self.vad.release_conn_resources(self)
+                tasks.append(self.vad_resume_task)
 
-            # 清理opus解码器
+        if not tasks:
+            self._tracked_tasks.discard(current)
+            self.timeout_task = None
+            self._aec_cache_cleanup_task = None
+            self._background_init_task = None
+            return
+
+        for t in tasks:
+            t.cancel()
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=self._cleanup_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            self.logger.bind(tag=TAG).warning(
+                f"取消会话任务超时({self._cleanup_timeout_seconds}s)，继续清理"
+            )
+        self._tracked_tasks.clear()
+        self.timeout_task = None
+        self._aec_cache_cleanup_task = None
+        self._background_init_task = None
+
+    def _drain_queue(self, q):
+        """非阻塞清空队列。"""
+        if not q:
+            return
+        while True:
+            try:
+                q.get_nowait()
+            except queue.Empty:
+                break
+
+    def _stop_report_thread(self):
+        """向上报线程投递毒丸并尽量 join。"""
+        try:
+            self.report_queue.put_nowait(None)
+        except queue.Full:
+            self._drain_queue(self.report_queue)
+            try:
+                self.report_queue.put_nowait(None)
+            except queue.Full:
+                pass
+        except Exception:
+            pass
+
+        if self.report_thread and self.report_thread.is_alive():
+            self.report_thread.join(timeout=min(2.0, self._cleanup_timeout_seconds))
+            if self.report_thread.is_alive():
+                self.logger.bind(tag=TAG).warning("上报线程未能在超时内退出")
+        self.report_thread = None
+
+    async def _safe_close_websocket(self, ws=None):
+        target = ws or self.websocket
+        if not target:
+            return
+        try:
+            if hasattr(target, "closed") and target.closed:
+                return
+            if hasattr(target, "state") and getattr(target.state, "name", "") == "CLOSED":
+                return
+            await target.close()
+        except Exception:
+            pass
+
+    async def close(self, ws=None):
+        """资源清理方法（幂等、确定性）。"""
+        if self._closed or self._closing:
+            return
+        self._closing = True
+        try:
+            # 1. 立刻打断后续业务
+            if self.stop_event:
+                self.stop_event.set()
+
+            # 2. 取消会话级后台任务
+            await self._cancel_tracked_tasks()
+
+            # 3. 清理 VAD 连接资源
+            if (
+                hasattr(self, "vad")
+                and self.vad
+                and hasattr(self.vad, "release_conn_resources")
+            ):
+                try:
+                    self.vad.release_conn_resources(self)
+                except Exception as e:
+                    self.logger.bind(tag=TAG).debug(f"释放VAD资源失败: {e}")
+
+            # 4. 清理 opus 解码器与音频缓冲
             if hasattr(self, "_connection_opus_decoder"):
                 try:
                     delattr(self, "_connection_opus_decoder")
                 except Exception:
                     pass
 
-            # 清理音频缓冲区
             if hasattr(self, "audio_buffer"):
                 self.audio_buffer.clear()
+            if hasattr(self, "client_audio_buffer"):
+                self.client_audio_buffer.clear()
+            if hasattr(self, "asr_audio"):
+                self.asr_audio.clear()
+            self._drain_queue(getattr(self, "asr_audio_queue", None))
 
-            # 取消超时任务
-            if self.timeout_task and not self.timeout_task.done():
-                self.timeout_task.cancel()
-                try:
-                    await self.timeout_task
-                except asyncio.CancelledError:
-                    pass
-                self.timeout_task = None
-
-            # 取消AEC缓存清理任务
-            if hasattr(self, "_aec_cache_cleanup_task") and self._aec_cache_cleanup_task and not self._aec_cache_cleanup_task.done():
-                self._aec_cache_cleanup_task.cancel()
-                try:
-                    await self._aec_cache_cleanup_task
-                except asyncio.CancelledError:
-                    pass
-                self._aec_cache_cleanup_task = None
-
-            # 清理AEC缓存
+            # 5. 清理 AEC 缓存
             if hasattr(self, "aec_audio_cache"):
                 self.aec_audio_cache.clear()
+            if hasattr(self, "aec_audio_cache_time"):
                 self.aec_audio_cache_time.clear()
 
-            # 清理工具处理器资源
+            # 6. 清理工具处理器
             if hasattr(self, "func_handler") and self.func_handler:
                 try:
-                    await self.func_handler.cleanup()
+                    await asyncio.wait_for(
+                        self.func_handler.cleanup(),
+                        timeout=self._cleanup_timeout_seconds,
+                    )
                 except Exception as cleanup_error:
                     self.logger.bind(tag=TAG).error(
                         f"清理工具处理器时出错: {cleanup_error}"
                     )
 
-            # 触发停止事件
-            if self.stop_event:
-                self.stop_event.set()
-
-            # 清空任务队列
+            # 7. 清空业务队列并停止上报线程
             self.clear_queues()
+            self._stop_report_thread()
 
-            # 关闭WebSocket连接
-            try:
-                if ws:
-                    # 安全地检查WebSocket状态并关闭
-                    try:
-                        if hasattr(ws, "closed") and not ws.closed:
-                            await ws.close()
-                        elif hasattr(ws, "state") and ws.state.name != "CLOSED":
-                            await ws.close()
-                        else:
-                            # 如果没有closed属性，直接尝试关闭
-                            await ws.close()
-                    except Exception:
-                        # 如果关闭失败，忽略错误
-                        pass
-                elif self.websocket:
-                    try:
-                        if (
-                                hasattr(self.websocket, "closed")
-                                and not self.websocket.closed
-                        ):
-                            await self.websocket.close()
-                        elif (
-                                hasattr(self.websocket, "state")
-                                and self.websocket.state.name != "CLOSED"
-                        ):
-                            await self.websocket.close()
-                        else:
-                            # 如果没有closed属性，直接尝试关闭
-                            await self.websocket.close()
-                    except Exception:
-                        # 如果关闭失败，忽略错误
-                        pass
-            except Exception as ws_error:
-                self.logger.bind(tag=TAG).error(f"关闭WebSocket连接时出错: {ws_error}")
+            # 8. 关闭 WebSocket
+            await self._safe_close_websocket(ws)
 
+            # 9. 关闭 TTS / ASR 上游连接
             if self.tts:
-                await self.tts.close()
+                try:
+                    await asyncio.wait_for(
+                        self.tts.close(), timeout=self._cleanup_timeout_seconds
+                    )
+                except Exception as e:
+                    self.logger.bind(tag=TAG).error(f"关闭TTS失败: {e}")
             if self.asr:
-                await self.asr.close()
+                try:
+                    await asyncio.wait_for(
+                        self.asr.close(), timeout=self._cleanup_timeout_seconds
+                    )
+                except Exception as e:
+                    self.logger.bind(tag=TAG).error(f"关闭ASR失败: {e}")
 
-            # 最后关闭线程池（避免阻塞）
+            # 10. 关闭线程池
             if self.executor:
                 try:
-                    self.executor.shutdown(wait=False)
+                    self.executor.shutdown(wait=False, cancel_futures=True)
+                except TypeError:
+                    # Python < 3.9 无 cancel_futures
+                    try:
+                        self.executor.shutdown(wait=False)
+                    except Exception as executor_error:
+                        self.logger.bind(tag=TAG).error(
+                            f"关闭线程池时出错: {executor_error}"
+                        )
                 except Exception as executor_error:
                     self.logger.bind(tag=TAG).error(
                         f"关闭线程池时出错: {executor_error}"
                     )
                 self.executor = None
-            self.logger.bind(tag=TAG).info("连接资源已释放")
+            self.logger.bind(tag=TAG).info(
+                f"连接资源已释放 session={self.session_id} device={self.device_id}"
+            )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"关闭连接时出错: {e}")
         finally:
-            # 确保停止事件被设置
             if self.stop_event:
                 self.stop_event.set()
+            self._closing = False
+            self._closed = True
 
     def clear_queues(self):
         """清空所有任务队列"""
+        queues = [self.report_queue, getattr(self, "asr_audio_queue", None)]
         if self.tts:
             self.logger.bind(tag=TAG).debug(
                 f"开始清理: TTS队列大小={self.tts.tts_text_queue.qsize()}, 音频队列大小={self.tts.tts_audio_queue.qsize()}"
             )
+            queues.extend([self.tts.tts_text_queue, self.tts.tts_audio_queue])
 
-            # 使用非阻塞方式清空队列
-            for q in [
-                self.tts.tts_text_queue,
-                self.tts.tts_audio_queue,
-                self.report_queue,
-            ]:
-                if not q:
-                    continue
-                while True:
-                    try:
-                        q.get_nowait()
-                    except queue.Empty:
-                        break
+        for q in queues:
+            self._drain_queue(q)
 
-            # 重置音频流控器（取消后台任务并清空队列）
-            if hasattr(self, "audio_rate_controller") and self.audio_rate_controller:
+        # 重置音频流控器（取消后台任务并清空队列）
+        if hasattr(self, "audio_rate_controller") and self.audio_rate_controller:
+            try:
                 self.audio_rate_controller.reset()
                 self.logger.bind(tag=TAG).debug("已重置音频流控器")
+            except Exception as e:
+                self.logger.bind(tag=TAG).debug(f"重置音频流控器失败: {e}")
 
+        if self.tts:
             self.logger.bind(tag=TAG).debug(
                 f"清理结束: TTS队列大小={self.tts.tts_text_queue.qsize()}, 音频队列大小={self.tts.tts_audio_queue.qsize()}"
             )
@@ -1710,15 +1821,9 @@ class ConnectionHandler:
                     if current_time - last_activity_time > self.timeout_seconds * 1000:
                         if not self.stop_event.is_set():
                             self.logger.bind(tag=TAG).info("连接超时，准备关闭")
-                            # 设置停止事件，防止重复处理
+                            # 只打断读循环，确定性清理交给 handle_connection.finally
                             self.stop_event.set()
-                            # 使用 try-except 包装关闭操作，确保不会因为异常而阻塞
-                            try:
-                                await self.close(self.websocket)
-                            except Exception as close_error:
-                                self.logger.bind(tag=TAG).error(
-                                    f"超时关闭连接时出错: {close_error}"
-                                )
+                            await self._safe_close_websocket(self.websocket)
                         break
                 # 每10秒检查一次，避免过于频繁
                 await asyncio.sleep(10)
