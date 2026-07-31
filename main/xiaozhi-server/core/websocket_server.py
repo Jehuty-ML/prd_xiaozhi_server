@@ -40,6 +40,7 @@ from config.config_loader import get_config_from_api_async
 from core.auth import AuthManager, AuthenticationError
 from core.utils.modules_initialize import initialize_modules
 from core.utils.util import check_vad_update, check_asr_update
+from core.utils import metrics as metrics_mod
 
 TAG = __name__
 
@@ -48,6 +49,7 @@ class WebSocketServer:
     def __init__(self, config: dict):
         self.config = config
         self.logger = setup_logging(config)
+        metrics_mod.init_metrics(config)
         self.config_lock = asyncio.Lock()
         modules = initialize_modules(
             self.logger,
@@ -75,10 +77,14 @@ class WebSocketServer:
 
         self.connection_limits = ConnectionLimits.from_config(self.config["server"])
         self.connection_registry = ConnectionRegistry(self.connection_limits)
+        metrics_mod.set_ws_max_connections(self.connection_limits.max_connections)
         self.logger.bind(tag=TAG).info(
             f"连接硬上限: max={self.connection_limits.max_connections}, "
             f"per_device={self.connection_limits.max_connections_per_device}, "
             f"report_queue={self.connection_limits.report_queue_maxsize}"
+        )
+        self.logger.bind(tag=TAG).info(
+            f"Prometheus指标: {'enabled' if metrics_mod.is_enabled() else 'disabled'}"
         )
 
     async def start(self):
@@ -128,19 +134,25 @@ class WebSocketServer:
             return
 
         device_id = dict(websocket.request.headers).get("device-id")
-        handler = ConnectionHandler(
-            self.config,
-            self._vad,
-            self._asr,
-            self._llm,
-            self._memory,
-            self._intent,
-            self,  # 传入server实例
-        )
+        # 先占名额，再创建重资源 Handler，避免超限仍初始化会话
+        import uuid as _uuid
+
+        session_id = str(_uuid.uuid4())
         acquired = False
+        handler = None
         try:
-            await self.connection_registry.try_acquire(handler.session_id, device_id)
+            await self.connection_registry.try_acquire(session_id, device_id)
             acquired = True
+            handler = ConnectionHandler(
+                self.config,
+                self._vad,
+                self._asr,
+                self._llm,
+                self._memory,
+                self._intent,
+                self,  # 传入server实例
+            )
+            handler.session_id = session_id
             self.logger.bind(tag=TAG).info(
                 f"连接准入通过 device={device_id} session={handler.session_id} "
                 f"active={self.connection_registry.active_count}/"
@@ -161,7 +173,7 @@ class WebSocketServer:
             self.logger.bind(tag=TAG).error(f"处理连接时出错: {e}")
         finally:
             if acquired:
-                await self.connection_registry.release(handler.session_id)
+                await self.connection_registry.release(session_id)
             # 强制关闭连接（如果还没有关闭的话）
             try:
                 # 安全地检查WebSocket状态并关闭
@@ -218,6 +230,9 @@ class WebSocketServer:
                     self.config["server"]
                 )
                 self.connection_registry.limits = self.connection_limits
+                metrics_mod.set_ws_max_connections(
+                    self.connection_limits.max_connections
+                )
                 # 重新初始化组件
                 modules = initialize_modules(
                     self.logger,

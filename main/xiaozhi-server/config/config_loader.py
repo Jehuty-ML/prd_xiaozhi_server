@@ -40,7 +40,9 @@ async def load_config():
     custom_config = read_config(custom_config_path)
 
     if custom_config.get("manager-api", {}).get("url"):
-        config = await get_config_from_api_async(custom_config)
+        config = await get_config_from_api_async(
+            custom_config, default_local_server=default_config.get("server")
+        )
     else:
         # 合并配置
         config = merge_configs(default_config, custom_config)
@@ -52,8 +54,13 @@ async def load_config():
     return config
 
 
-async def get_config_from_api_async(config):
-    """从Java API获取配置（异步版本）"""
+async def get_config_from_api_async(config, default_local_server=None):
+    """从Java API获取配置（异步版本）
+
+    Args:
+        config: 本地自定义配置（通常来自 data/.config.yaml）
+        default_local_server: 默认 config.yaml 中的 server 段，用于保留 connection 等本地字段
+    """
     # 初始化API客户端
     init_service(config)
 
@@ -68,15 +75,34 @@ async def get_config_from_api_async(config):
         "secret": config["manager-api"].get("secret", ""),
     }
     auth_enabled = config_data.get("server", {}).get("auth", {}).get("enabled", False)
-    # server的配置以本地为准
+    # server的配置以本地为准（含连接硬上限）
+    # 优先 data/.config.yaml，其次默认 config.yaml
+    local_server = {}
+    if default_local_server:
+        local_server.update(default_local_server)
     if config.get("server"):
+        local_server.update(config["server"])
+
+    if local_server:
         config_data["server"] = {
-            "ip": config["server"].get("ip", ""),
-            "port": config["server"].get("port", ""),
-            "http_port": config["server"].get("http_port", ""),
-            "vision_explain": config["server"].get("vision_explain", ""),
-            "auth_key": config["server"].get("auth_key", ""),
+            "ip": local_server.get("ip", ""),
+            "port": local_server.get("port", ""),
+            "http_port": local_server.get("http_port", ""),
+            "vision_explain": local_server.get("vision_explain", ""),
+            "auth_key": local_server.get("auth_key", ""),
         }
+        if local_server.get("connection"):
+            config_data["server"]["connection"] = local_server["connection"]
+        if local_server.get("metrics"):
+            config_data["server"]["metrics"] = local_server["metrics"]
+        if local_server.get("mqtt_gateway") is not None:
+            config_data["server"]["mqtt_gateway"] = local_server.get("mqtt_gateway")
+        if local_server.get("mqtt_signature_key") is not None:
+            config_data["server"]["mqtt_signature_key"] = local_server.get(
+                "mqtt_signature_key"
+            )
+        if local_server.get("udp_gateway") is not None:
+            config_data["server"]["udp_gateway"] = local_server.get("udp_gateway")
     config_data["server"]["auth"] = {"enabled": auth_enabled}
     # 如果服务器没有prompt_template，则从本地配置读取
     if not config_data.get("prompt_template"):

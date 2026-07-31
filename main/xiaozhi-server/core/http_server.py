@@ -3,6 +3,7 @@ from aiohttp import web
 from config.logger import setup_logging
 from core.api.ota_handler import OTAHandler
 from core.api.vision_handler import VisionHandler
+from core.utils import metrics as metrics_mod
 
 TAG = __name__
 
@@ -13,6 +14,7 @@ class SimpleHttpServer:
         self.logger = setup_logging()
         self.ota_handler = OTAHandler(config)
         self.vision_handler = VisionHandler(config)
+        metrics_mod.init_metrics(config)
 
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
         """获取websocket地址
@@ -32,12 +34,23 @@ class SimpleHttpServer:
         else:
             return f"ws://{local_ip}:{port}/xiaozhi/v1/"
 
+    async def handle_metrics(self, request):
+        """Prometheus metrics exposition"""
+        body = metrics_mod.render_latest()
+        return web.Response(
+            body=body, headers={"Content-Type": metrics_mod.content_type()}
+        )
+
     async def start(self):
         try:
             server_config = self.config["server"]
             read_config_from_api = self.config.get("read_config_from_api", False)
             host = server_config.get("ip", "0.0.0.0")
             port = int(server_config.get("http_port", 8003))
+            metrics_cfg = server_config.get("metrics") or {}
+            metrics_path = metrics_cfg.get("path", "/metrics")
+            if not str(metrics_path).startswith("/"):
+                metrics_path = "/" + str(metrics_path)
 
             if port:
                 app = web.Application()
@@ -63,23 +76,26 @@ class SimpleHttpServer:
                         ]
                     )
                 # 添加路由
-                app.add_routes(
-                    [
-                        web.get("/mcp/vision/explain", self.vision_handler.handle_get),
-                        web.post(
-                            "/mcp/vision/explain", self.vision_handler.handle_post
-                        ),
-                        web.options(
-                            "/mcp/vision/explain", self.vision_handler.handle_options
-                        ),
-                    ]
-                )
+                routes = [
+                    web.get("/mcp/vision/explain", self.vision_handler.handle_get),
+                    web.post("/mcp/vision/explain", self.vision_handler.handle_post),
+                    web.options(
+                        "/mcp/vision/explain", self.vision_handler.handle_options
+                    ),
+                ]
+                if metrics_cfg.get("enabled", True):
+                    routes.append(web.get(metrics_path, self.handle_metrics))
+                app.add_routes(routes)
 
                 # 运行服务
                 runner = web.AppRunner(app)
                 await runner.setup()
                 site = web.TCPSite(runner, host, port)
                 await site.start()
+                if metrics_cfg.get("enabled", True):
+                    self.logger.bind(tag=TAG).info(
+                        f"Prometheus metrics: http://{host}:{port}{metrics_path}"
+                    )
 
                 # 保持服务运行
                 while True:

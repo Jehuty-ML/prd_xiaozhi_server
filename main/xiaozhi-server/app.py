@@ -88,6 +88,17 @@ async def main():
         get_local_ip(),
         port,
     )
+    metrics_cfg = config.get("server", {}).get("metrics") or {}
+    if metrics_cfg.get("enabled", True):
+        metrics_path = metrics_cfg.get("path", "/metrics")
+        if not str(metrics_path).startswith("/"):
+            metrics_path = "/" + str(metrics_path)
+        logger.bind(tag=TAG).info(
+            "Prometheus指标是\thttp://{}:{}{}",
+            get_local_ip(),
+            port,
+            metrics_path,
+        )
     mcp_endpoint = config.get("mcp_endpoint", None)
     if mcp_endpoint is not None and "你" not in mcp_endpoint:
         # 校验MCP接入点格式

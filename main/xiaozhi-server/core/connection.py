@@ -45,6 +45,7 @@ from core.utils.prompt_manager import PromptManager
 from core.utils.voiceprint_provider import VoiceprintProvider
 from core.utils.util import get_system_error_response
 from core.utils import textUtils
+from core.utils import metrics as metrics_mod
 
 
 TAG = __name__
@@ -141,6 +142,7 @@ class ConnectionHandler:
         self._tracked_tasks: set = set()
         self._background_init_task = None
         self._aec_cache_cleanup_task = None
+        self._session_started_at = None
 
         # 依赖的组件
         self.vad = None
@@ -244,6 +246,7 @@ class ConnectionHandler:
             # 初始化活动时间戳
             self.first_activity_time = time.time() * 1000
             self.last_activity_time = time.time() * 1000
+            self._session_started_at = time.time()
 
             # 启动超时检查任务
             self.timeout_task = self.spawn_task(self._check_timeout())
@@ -1160,6 +1163,12 @@ class ConnectionHandler:
                     ),
                 )
         except Exception as e:
+            metrics_mod.observe_provider(
+                "llm",
+                metrics_mod.provider_name_from_obj(self.llm),
+                0.0,
+                status="error",
+            )
             self.logger.bind(tag=TAG).error(f"LLM 处理出错 {query}: {e}")
             return None
 
@@ -1169,8 +1178,14 @@ class ConnectionHandler:
         tool_calls_list = []  # 格式: [{"id": "", "name": "", "arguments": ""}]
         content_arguments = ""
         emotion_flag = True
+        llm_provider = metrics_mod.provider_name_from_obj(self.llm)
+        llm_t0 = time.perf_counter()
+        llm_ttfb = None
+        llm_status = "ok"
         try:
             for response in llm_responses:
+                if llm_ttfb is None:
+                    llm_ttfb = time.perf_counter() - llm_t0
                 if self.client_abort:
                     break
                 if self.intent_type == "function_call" and functions is not None:
@@ -1236,6 +1251,7 @@ class ConnectionHandler:
                             )
                         )
         except Exception as e:
+            llm_status = "error"
             self.logger.bind(tag=TAG).error(f"LLM stream processing error: {e}")
             self.tts.tts_text_queue.put(
                 TTSMessageDTO(
@@ -1253,7 +1269,21 @@ class ConnectionHandler:
                         content_type=ContentType.ACTION,
                     )
                 )
+            metrics_mod.observe_provider(
+                "llm",
+                llm_provider,
+                time.perf_counter() - llm_t0,
+                status=llm_status,
+                ttfb=llm_ttfb,
+            )
             return
+        metrics_mod.observe_provider(
+            "llm",
+            llm_provider,
+            time.perf_counter() - llm_t0,
+            status=llm_status,
+            ttfb=llm_ttfb,
+        )
         # 处理function call
         if tool_call_flag:
             bHasError = False
@@ -1652,6 +1682,26 @@ class ConnectionHandler:
             return
         self._closing = True
         try:
+            # 会话时长
+            if self._session_started_at:
+                metrics_mod.observe_ws_session_duration(
+                    time.time() - self._session_started_at
+                )
+            # 队列水位快照
+            try:
+                metrics_mod.set_queue_depth(
+                    "report", self.report_queue.qsize() if self.report_queue else 0
+                )
+                if self.tts:
+                    metrics_mod.set_queue_depth(
+                        "tts_text", self.tts.tts_text_queue.qsize()
+                    )
+                    metrics_mod.set_queue_depth(
+                        "tts_audio", self.tts.tts_audio_queue.qsize()
+                    )
+            except Exception:
+                pass
+
             # 1. 立刻打断后续业务
             if self.stop_event:
                 self.stop_event.set()

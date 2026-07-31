@@ -37,7 +37,7 @@
 
 1. [x] **硬上限**：全局并发、同设备并发、上报队列有界
 2. [x] **确定性清理**：幂等 `close()`、任务登记与统一取消、固定清理顺序、清理超时
-3. [ ] **可观测性**：连接数 / 拒绝数、会话生命周期、ASR/TTS/LLM 延迟与错误率、队列深度
+3. [x] **可观测性**：连接数 / 拒绝数、会话生命周期、ASR/TTS/LLM 延迟与错误率、队列深度（Prometheus）
 4. [ ] **安全基线**：默认开启认证、禁止 query 传 token、密钥与盐值规范化、去掉硬编码密钥
 5. [ ] **依赖韧性**：统一超时、有限重试、熔断、对设备侧友好降级话术
 6. [ ] **结构拆分与测试**：拆分 `ConnectionHandler`、补连接生命周期与限流单测
@@ -184,29 +184,68 @@ server:
 | `core/connection.py` | 幂等 `close()`、任务跟踪、有界上报队列、确定性清理 |
 | `core/handle/reportHandle.py` | `put_nowait` + 队列满丢弃 |
 | `core/handle/receiveAudioHandle.py` | VAD resume 走 `spawn_task` |
-| `config.yaml` | 新增 `server.connection` 配置段 |
+| `config.yaml` / `data/.config.yaml` | `server.connection`、`server.metrics` |
+| `core/utils/metrics.py` | **新建**：Prometheus 指标封装 |
+| `core/http_server.py` | 暴露 `/metrics` |
+| `core/providers/asr/base.py` / `tts/base.py` | ASR/TTS 延迟与错误率 |
+| `scripts/ws_lifecycle_smoke.py` | A/B/C 连接生命周期冒烟 |
+
+---
+
+## 6.1 已落地：可观测性（Prometheus）
+
+### 指标一览
+
+| 指标 | 类型 | 含义 |
+|------|------|------|
+| `xiaozhi_ws_active_connections` | Gauge | 当前活跃 WS 会话 |
+| `xiaozhi_ws_max_connections` | Gauge | 配置的全局上限 |
+| `xiaozhi_ws_rejected_total{reason}` | Counter | 硬上限拒绝（capacity / device_limit） |
+| `xiaozhi_ws_sessions_opened_total` | Counter | 成功准入会话数 |
+| `xiaozhi_ws_session_duration_seconds` | Histogram | 会话存活时长 |
+| `xiaozhi_provider_requests_total{component,provider,status}` | Counter | ASR/TTS/LLM 请求（ok/error/empty） |
+| `xiaozhi_provider_latency_seconds{component,provider}` | Histogram | 端到端耗时 |
+| `xiaozhi_provider_ttfb_seconds{component,provider}` | Histogram | LLM 首 token 时延 |
+| `xiaozhi_queue_depth{queue}` | Gauge | `report` / `tts_text` / `tts_audio` 队列深度 |
+
+### 配置
+
+写在 `data/.config.yaml`（本地覆盖）或 `config.yaml`：
+
+```yaml
+server:
+  metrics:
+    enabled: true
+    path: /metrics
+```
+
+拉取地址：`http://<host>:<http_port>/metrics`（默认端口 `8003`）
+
+依赖：`prometheus_client`（见 `requirements.txt`）
 
 ---
 
 ## 7. 如何验证
 
 1. **启动日志**应出现类似：  
-   `连接硬上限: max=500, per_device=2, report_queue=100`
+   `连接硬上限: max=500, per_device=2, report_queue=100`  
+   `Prometheus metrics: http://0.0.0.0:8003/metrics`
 2. **HTTP 访问 WS 端口**（非 Upgrade）应看到：  
    `active_connections=...` / `max_connections=...`
 3. **压测同 device-id** 超过 `max_connections_per_device`：新连接被拒，日志含 `连接被拒绝`
 4. **正常断开 / 超时断开**：日志出现 `连接资源已释放 session=... device=...`，连接水位回落
 5. **重复触发关闭**（客户端断 + 服务端 finally）：不应出现成片二次清理异常
+6. **curl 指标**：`curl http://127.0.0.1:8003/metrics | findstr xiaozhi`
 
 ---
 
 ## 8. 后续建议（未做）
 
-1. **指标**：Prometheus（或等价）暴露 `ws_active`、`ws_rejected`、`close_duration`、各 provider 错误率  
-2. **真 readiness**：区分 liveness / readiness（依赖、队列、连接水位），不要只返回文案  
-3. **安全**：生产默认 `auth.enabled=true`；token 仅 Header；清理硬编码密钥  
-4. **熔断降级**：上游超时后对设备播放固定提示音/短句，避免静默挂起  
-5. **单测**：至少覆盖 `ConnectionRegistry` 限流与 `close()` 幂等路径  
+1. **真 readiness**：区分 liveness / readiness（依赖、队列、连接水位）
+2. **安全**：生产默认 `auth.enabled=true`；token 仅 Header；清理硬编码密钥
+3. **熔断降级**：上游超时后对设备播放固定提示音/短句，避免静默挂起
+4. **单测**：至少覆盖 `ConnectionRegistry` 限流与 `close()` 幂等路径
+5. **OTel traces**（第二期）：会话级链路追踪，指标仍可导出到 Prometheus
 
 ---
 
