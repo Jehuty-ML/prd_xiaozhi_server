@@ -7,6 +7,11 @@
 # #####################################################################################
 # #############################以下是服务器基本运行配置####################################
 server:
+  # 运行环境：development | production
+  # 也可用环境变量 XIAOZHI_ENV / APP_ENV 覆盖
+  # development：允许 query 传 token、硬编码 key 兜底（方便联调）
+  # production：禁止上述危险兼容行为
+  environment: development
   # 服务器监听地址和端口(Server listening address and port)
   ip: 0.0.0.0
   port: 8000
@@ -29,8 +34,13 @@ server:
   timezone_offset: +8
   # 认证配置
   auth:
-    # 是否启用认证
+    # 是否启用认证（development 默认 false；production 强制 true）
+    # 生产若必须临时关闭：设 allow_insecure_disable: true 且 enabled: false
     enabled: false
+    allow_insecure_disable: false
+    # 可选：自定义 PBKDF2 盐（字符串会做 SHA256 规范化）。不配则：
+    # development 用历史固定盐；production 由 auth_key 派生
+    # pbkdf2_salt: your-deploy-salt
     # 白名单设备ID列表
     # 如果属于白名单内的设备，不校验token，直接放行
     allowed_devices:

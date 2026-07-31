@@ -10,6 +10,7 @@ from typing import Dict, List, Tuple
 from aiohttp import web
 
 from core.auth import AuthManager
+from core.utils.runtime_env import resolve_auth_enabled, resolve_environment
 from core.utils.util import get_local_ip, get_vision_url
 from core.api.base_handler import BaseHandler
 
@@ -46,13 +47,17 @@ def _is_higher_version(a: str, b: str) -> bool:
 class OTAHandler(BaseHandler):
     def __init__(self, config: dict):
         super().__init__(config)
-        auth_config = config["server"].get("auth", {})
-        self.auth_enable = auth_config.get("enabled", False)
+        auth_config = config["server"].get("auth", {}) or {}
+        self.auth_enable = resolve_auth_enabled(config)
         # 设备白名单
         self.allowed_devices = set(auth_config.get("allowed_devices", []))
         secret_key = config["server"]["auth_key"]
         expire_seconds = auth_config.get("expire_seconds")
         self.auth = AuthManager(secret_key=secret_key, expire_seconds=expire_seconds)
+        self.logger.bind(tag=TAG).info(
+            f"OTA认证: {'enabled' if self.auth_enable else 'disabled'} "
+            f"(env={resolve_environment(config)})"
+        )
 
         # firmware storage
         self.bin_dir = os.path.join(os.getcwd(), "data", "bin")

@@ -41,6 +41,11 @@ from core.auth import AuthManager, AuthenticationError
 from core.utils.modules_initialize import initialize_modules
 from core.utils.util import check_vad_update, check_asr_update
 from core.utils import metrics as metrics_mod
+from core.utils.runtime_env import (
+    allow_query_authorization,
+    resolve_auth_enabled,
+    resolve_environment,
+)
 
 TAG = __name__
 
@@ -51,6 +56,8 @@ class WebSocketServer:
         self.logger = setup_logging(config)
         metrics_mod.init_metrics(config)
         self.config_lock = asyncio.Lock()
+        self.environment = resolve_environment(config)
+        self.logger.bind(tag=TAG).info(f"运行环境: {self.environment}")
         modules = initialize_modules(
             self.logger,
             self.config,
@@ -67,13 +74,17 @@ class WebSocketServer:
         self._intent = modules["intent"] if "intent" in modules else None
         self._memory = modules["memory"] if "memory" in modules else None
 
-        auth_config = self.config["server"].get("auth", {})
-        self.auth_enable = auth_config.get("enabled", False)
+        auth_config = self.config["server"].get("auth", {}) or {}
+        self.auth_enable = resolve_auth_enabled(self.config)
         # 设备白名单
         self.allowed_devices = set(auth_config.get("allowed_devices", []))
         secret_key = self.config["server"]["auth_key"]
         expire_seconds = auth_config.get("expire_seconds", None)
         self.auth = AuthManager(secret_key=secret_key, expire_seconds=expire_seconds)
+        self.logger.bind(tag=TAG).info(
+            f"连接认证: {'enabled' if self.auth_enable else 'disabled'} "
+            f"(env={self.environment})"
+        )
 
         self.connection_limits = ConnectionLimits.from_config(self.config["server"])
         self.connection_registry = ConnectionRegistry(self.connection_limits)
@@ -120,9 +131,17 @@ class WebSocketServer:
             if "client-id" in query_params:
                 websocket.request.headers["client-id"] = query_params["client-id"][0]
             if "authorization" in query_params:
-                websocket.request.headers["authorization"] = query_params[
-                    "authorization"
-                ][0]
+                if allow_query_authorization(self.config):
+                    websocket.request.headers["authorization"] = query_params[
+                        "authorization"
+                    ][0]
+                    self.logger.bind(tag=TAG).warning(
+                        "开发环境：已从 URL query 注入 authorization（生产环境将拒绝）"
+                    )
+                else:
+                    self.logger.bind(tag=TAG).warning(
+                        "生产环境禁止从 URL query 传递 authorization，请使用 Header"
+                    )
 
         """处理新连接，每次创建独立的ConnectionHandler"""
         # 先认证，后建立连接
@@ -233,6 +252,8 @@ class WebSocketServer:
                 )
                 # 更新配置
                 self.config = new_config
+                self.environment = resolve_environment(new_config)
+                self.logger.bind(tag=TAG).info(f"运行环境已同步: {self.environment}")
                 # 同步连接硬上限（不影响已建立连接）
                 self.connection_limits = ConnectionLimits.from_config(
                     self.config["server"]
