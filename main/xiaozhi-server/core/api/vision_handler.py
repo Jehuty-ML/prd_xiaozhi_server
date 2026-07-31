@@ -20,8 +20,8 @@ MAX_FILE_SIZE = 5 * 1024 * 1024
 class VisionHandler(BaseHandler):
     def __init__(self, config: dict):
         super().__init__(config)
-        # 初始化认证工具
-        self.auth = AuthToken(config["server"]["auth_key"])
+        # 初始化认证工具（生产环境使用规范化盐值）
+        self.auth = AuthToken.from_config(config)
 
     def _create_error_response(self, message: str) -> dict:
         """创建统一的错误响应格式"""

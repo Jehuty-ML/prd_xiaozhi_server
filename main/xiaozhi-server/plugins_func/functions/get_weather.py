@@ -164,10 +164,25 @@ def parse_weather_info(soup):
 @register_function("get_weather", GET_WEATHER_FUNCTION_DESC, ToolType.SYSTEM_CTL)
 async def get_weather(conn: "ConnectionHandler", location: str = None, lang: str = "zh_CN"):
     from core.utils.cache.manager import cache_manager, CacheType
+    from core.utils.runtime_env import get_config_secret
 
     weather_config = conn.config.get("plugins", {}).get("get_weather", {})
     api_host = weather_config.get("api_host", "mj7p3y7naa.re.qweatherapi.com")
-    api_key = weather_config.get("api_key", "a861d0d5e7bf4ee1a83d9a9e4f96d4da")
+    api_key = get_config_secret(
+        weather_config,
+        "api_key",
+        hardcoded_fallback="a861d0d5e7bf4ee1a83d9a9e4f96d4da",
+        config=conn.config,
+    )
+    if not api_key:
+        conn.logger.bind(tag=TAG).error(
+            "天气插件未配置 api_key（生产环境禁止使用代码内硬编码兜底）"
+        )
+        return ActionResponse(
+            action=Action.RESPONSE,
+            result="天气服务未配置密钥，请在智控台或配置文件中设置 plugins.get_weather.api_key",
+            response="天气服务暂时不可用，请稍后再试。",
+        )
     default_location = weather_config.get("default_location", "广州")
     client_ip = conn.client_ip
 

@@ -11,22 +11,32 @@ import base64
 
 
 class AuthToken:
-    def __init__(self, secret_key: str):
-        self.secret_key = secret_key.encode()  # 转换为字节
+    def __init__(self, secret_key: str, salt: bytes | None = None):
+        self.secret_key = (
+            secret_key.encode() if isinstance(secret_key, str) else secret_key
+        )
+        # 开发环境默认固定盐；生产由调用方传入规范化盐
+        self._salt = salt if salt is not None else b"fixed_salt_placeholder"
         # 从密钥派生固定长度的加密密钥 (32字节 for AES-256)
         self.encryption_key = self._derive_key(32)
+
+    @classmethod
+    def from_config(cls, config: dict) -> "AuthToken":
+        from core.utils.runtime_env import resolve_auth_kdf_salt
+
+        secret_key = (config.get("server") or {}).get("auth_key") or ""
+        salt = resolve_auth_kdf_salt(config, secret_key)
+        return cls(secret_key, salt=salt)
 
     def _derive_key(self, length: int) -> bytes:
         """派生固定长度的密钥"""
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-        # 使用固定盐值（实际生产环境应使用随机盐）
-        salt = b"fixed_salt_placeholder"  # 生产环境应改为随机生成
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=length,
-            salt=salt,
+            salt=self._salt,
             iterations=100000,
             backend=default_backend(),
         )

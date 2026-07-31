@@ -83,7 +83,6 @@ async def get_config_from_api_async(config, default_local_server=None):
     api_server = config_data.get("server") or {}
     if not isinstance(api_server, dict):
         api_server = {}
-    auth_enabled = (api_server.get("auth") or {}).get("enabled", False)
 
     custom_server = config.get("server") or {}
     if not isinstance(custom_server, dict):
@@ -97,17 +96,27 @@ async def get_config_from_api_async(config, default_local_server=None):
     bind_server.update(default_server)
     bind_server.update(custom_server)
 
+    # auth：默认 < API < 本地；生产强制开启由 runtime_env.resolve_auth_enabled 处理
+    merged_auth = {}
+    if isinstance(default_server.get("auth"), dict):
+        merged_auth.update(default_server["auth"])
+    if isinstance(api_server.get("auth"), dict):
+        merged_auth.update(api_server["auth"])
+    if isinstance(custom_server.get("auth"), dict):
+        merged_auth.update(custom_server["auth"])
+
     merged_server = {
         "ip": bind_server.get("ip", "0.0.0.0"),
         "port": bind_server.get("port", 8000),
         "http_port": bind_server.get("http_port", 8003),
         "vision_explain": bind_server.get("vision_explain", ""),
         "auth_key": bind_server.get("auth_key", ""),
-        "auth": {"enabled": auth_enabled},
+        "auth": merged_auth,
     }
 
     # 保留 API 下发的网关类字段；本地显式配置可覆盖
     for key in (
+        "environment",
         "websocket",
         "ota",
         "mcp_endpoint",
@@ -120,6 +129,14 @@ async def get_config_from_api_async(config, default_local_server=None):
             merged_server[key] = api_server.get(key)
         if key in custom_server:
             merged_server[key] = custom_server.get(key)
+
+    # 本地/默认 environment 兜底
+    if not merged_server.get("environment"):
+        merged_server["environment"] = (
+            custom_server.get("environment")
+            or default_server.get("environment")
+            or "development"
+        )
 
     # connection：默认 < API < 本地 data/.config.yaml 显式覆盖
     merged_connection = {}

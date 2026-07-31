@@ -240,8 +240,8 @@ async def send_mcp_initialize_message(conn: "ConnectionHandler"):
 
     vision_url = get_vision_url(conn.config)
 
-    # 密钥生成token
-    auth = AuthToken(conn.config["server"]["auth_key"])
+    # 密钥生成token（生产环境使用规范化盐值）
+    auth = AuthToken.from_config(conn.config)
     token = auth.generate_token(conn.headers.get("device-id"))
 
     vision = {

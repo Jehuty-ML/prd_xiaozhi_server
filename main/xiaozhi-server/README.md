@@ -38,7 +38,7 @@
 1. [x] **硬上限**：全局并发、同设备并发、上报队列有界
 2. [x] **确定性清理**：幂等 `close()`、任务登记与统一取消、固定清理顺序、清理超时
 3. [x] **可观测性**：连接数 / 拒绝数、会话生命周期、ASR/TTS/LLM 延迟与错误率、队列深度（Prometheus）
-4. [ ] **安全基线**：默认开启认证、禁止 query 传 token、密钥与盐值规范化、去掉硬编码密钥
+4. [x] **安全基线（按环境）**：`development` 保留联调兼容；`production` 禁止 query token、禁止硬编码 key 兜底、默认强制 auth、AuthToken 盐值规范化。可选收紧：白名单策略
 5. [ ] **依赖韧性**：统一超时、有限重试、熔断、对设备侧友好降级话术
 6. [ ] **结构拆分与测试**：拆分 `ConnectionHandler`、补连接生命周期与限流单测
 
@@ -229,9 +229,33 @@ server:
 
 ---
 
+## 6.2 环境安全策略（部分落地）
+
+通过 `server.environment`（或环境变量 `XIAOZHI_ENV` / `APP_ENV`）区分：
+
+| 行为 | development | production |
+|------|-------------|------------|
+| URL query 传 `authorization` | 允许（打 warning） | 拒绝，仅 Header |
+| 天气等硬编码 api_key 兜底 | 允许 | 禁止，未配置则失败 |
+| 连接/OTA 认证 `auth.enabled` | 尊重配置（默认 false） | **强制开启**（除非 `auth.allow_insecure_disable=true`） |
+| AuthToken PBKDF2 盐 | 历史固定盐（兼容旧 token） | 由 `auth_key` 派生或 `auth.pbkdf2_salt` |
+| query 传 `device-id` / `client-id` | 允许 | 允许（非密钥） |
+
+配置示例：
+
+```yaml
+server:
+  environment: development  # 上线改为 production
+```
+
+智控台参数：`server.environment`
+
+---
+
 ## 7. 如何验证
 
 1. **启动日志**应出现类似：  
+   `运行环境: development`  
    `连接硬上限: max=500, per_device=2, report_queue=100`  
    `Prometheus metrics: http://0.0.0.0:8003/metrics`
 2. **HTTP 访问 WS 端口**（非 Upgrade）应看到：  
@@ -246,7 +270,7 @@ server:
 ## 8. 后续建议（未做）
 
 1. **真 readiness**：区分 liveness / readiness（依赖、队列、连接水位）
-2. **安全**：生产默认 `auth.enabled=true`；token 仅 Header；清理硬编码密钥
+2. **安全收尾（可选）**：生产环境收紧设备白名单免检策略
 3. **熔断降级**：上游超时后对设备播放固定提示音/短句，避免静默挂起
 4. **单测**：至少覆盖 `ConnectionRegistry` 限流与 `close()` 幂等路径
 5. **OTel traces**（第二期）：会话级链路追踪，指标仍可导出到 Prometheus
