@@ -97,7 +97,7 @@ class ASRProviderBase(ABC):
 
             # 定义ASR任务
             asr_task = self.speech_to_text_wrapper(
-                asr_audio_task, conn.session_id
+                asr_audio_task, conn.session_id, config=conn.config
             )
 
             if conn.voiceprint_provider and wav_data:
@@ -113,11 +113,16 @@ class ASRProviderBase(ABC):
                 voiceprint_result = None
 
             # 记录识别结果 - 检查是否为异常
+            asr_failed = False
             if isinstance(asr_result, Exception):
                 logger.bind(tag=TAG).error(f"ASR识别失败: {asr_result}")
                 raw_text = ""
+                asr_failed = True
             else:
                 raw_text, _ = asr_result
+                if raw_text is None:
+                    raw_text = ""
+                    asr_failed = True
 
             if isinstance(voiceprint_result, Exception):
                 logger.bind(tag=TAG).error(f"声纹识别失败: {voiceprint_result}")
@@ -159,7 +164,9 @@ class ASRProviderBase(ABC):
             total_time = time.monotonic() - total_start_time
             logger.bind(tag=TAG).debug(f"总处理耗时: {total_time:.3f}s")
 
-            # 检查文本长度
+            # 检查文本长度（None 视为空，避免 TypeError）
+            if content_for_length_check is None:
+                content_for_length_check = ""
             text_len, _ = remove_punctuation_and_length(content_for_length_check)
             self.stop_ws_connection()
 
@@ -168,11 +175,27 @@ class ASRProviderBase(ABC):
                 enqueue_asr_report(conn, enhanced_text, audio_snapshot)
                 # 使用自定义模块进行上报
                 await startToChat(conn, enhanced_text)
+            elif asr_audio_task and any(asr_audio_task):
+                # 有音频但无识别文本：对设备播报降级话术，避免静默
+                from core.utils.resilience import UpstreamKind, speak_degradation
+
+                kind = (
+                    UpstreamKind.UNAVAILABLE
+                    if asr_failed
+                    else UpstreamKind.EMPTY
+                )
+                speak_degradation(conn, "asr", kind)
         except Exception as e:
             logger.bind(tag=TAG).error(f"处理语音停止失败: {e}")
             import traceback
 
             logger.bind(tag=TAG).debug(f"异常详情: {traceback.format_exc()}")
+            try:
+                from core.utils.resilience import UpstreamKind, speak_degradation
+
+                speak_degradation(conn, "asr", UpstreamKind.UNAVAILABLE)
+            except Exception:
+                pass
 
     def _build_enhanced_text(self, text: str, speaker_name: Optional[str]) -> str:
         """构建包含说话人信息的文本（仅用于纯文本ASR）"""
@@ -266,15 +289,31 @@ class ASRProviderBase(ABC):
         return file_path
 
     async def speech_to_text_wrapper(
-        self, pcm_data: List[bytes], session_id: str
+        self, pcm_data: List[bytes], session_id: str, config: Optional[dict] = None
     ) -> Tuple[Optional[str], Optional[str]]:
         from core.utils import metrics as metrics_mod
+        from core.utils.resilience import (
+            UpstreamError,
+            UpstreamKind,
+            async_call_with_resilience,
+            get_resilience_settings,
+        )
 
         file_path = None
         temp_path = None
         provider = metrics_mod.provider_name_from_obj(self)
         t0 = time.perf_counter()
         status = "ok"
+        conn_config = config
+        if conn_config is None:
+            try:
+                bound = getattr(self, "conn", None)
+                if bound is not None:
+                    conn_config = getattr(bound, "config", None)
+            except Exception:
+                conn_config = None
+
+        settings = get_resilience_settings(conn_config)
         try:
             combined_pcm_data = b"".join(pcm_data)
 
@@ -300,12 +339,25 @@ class ASRProviderBase(ABC):
                     temp_path=temp_path,
                 )
 
-            text, _ = await self.speech_to_text(
-                pcm_data, session_id, artifacts
+            async def _do_asr():
+                return await self.speech_to_text(pcm_data, session_id, artifacts)
+
+            text, _ = await async_call_with_resilience(
+                "asr",
+                _do_asr,
+                config=conn_config,
+                provider=provider,
+                timeout=settings.asr_timeout_seconds,
+                max_retries=settings.max_retries,
+                retry_delay=settings.retry_delay_seconds,
             )
             if not text:
                 status = "empty"
             return text, file_path
+        except UpstreamError as e:
+            status = "empty" if e.kind == UpstreamKind.EMPTY else "error"
+            logger.bind(tag=TAG).error(f"语音识别失败: {e.kind.value} {e}")
+            return None, None
         except OSError as e:
             status = "error"
             logger.bind(tag=TAG).error(f"文件操作错误: {e}")

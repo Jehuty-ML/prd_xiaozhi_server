@@ -66,6 +66,27 @@ server:
   metrics:
     enabled: true
     path: /metrics
+  # 上游依赖韧性：统一超时/重试/熔断 + 设备侧降级话术
+  # 本地覆盖请改 data/.config.yaml 同名段
+  resilience:
+    enabled: true
+    # 有限重试（瞬时故障）
+    max_retries: 2
+    retry_delay_seconds: 0.5
+    # 各阶段超时 / TTS 重试
+    asr_timeout_seconds: 15
+    llm_timeout_seconds: 60
+    tts_max_retries: 3
+    tts_retry_delay_seconds: 0.3
+    # 熔断：连续失败达阈值后开路，冷却后再半开探测
+    circuit_failure_threshold: 5
+    circuit_open_seconds: 30
+    # 降级话术（按阶段）；未配 llm 时回退到顶层 system_error_response
+    asr: "不好意思，我没听清楚，请再说一遍。"
+    asr_empty: "不好意思，我没听清楚，请再说一遍。"
+    llm: "主人，小智现在有点忙，我们稍后再试吧。"
+    tts: "抱歉，我暂时说不出话，请稍后再试。"
+    tool: "哎呀，网络遇到点问题，请稍后再试下！"
 log:
   # 设置控制台输出的日志格式，时间、日志级别、标签、消息
   log_format: "<green>{time:YYMMDD HH:mm:ss}</green>[{version}_{selected_module}][<light-blue>{extra[tag]}</light-blue>]-<level>{level}</level>-<light-green>{message}</light-green>"

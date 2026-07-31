@@ -25,7 +25,7 @@
 | P0 | 清理不完整、不幂等 | 多路径同时 `close`，任务/线程/队列泄漏 |
 | P1 | 可观测性不足 | 有日志，缺连接水位、ASR/TTS/LLM 耗时与失败率、队列积压 |
 | P1 | 安全基线弱 | auth 可关、白名单免 token、token 可走 query、密钥派生固定 salt、部分硬编码 key |
-| P2 | 上游依赖缺韧性 | ASR/TTS/LLM/manager-api 缺统一超时、重试、熔断、降级 |
+| P2 | 上游依赖缺韧性（已落地基础版） | ASR/TTS/LLM/manager-api：统一失败语义 + 超时/重试/熔断 + 设备侧降级话术 |
 | P3 | `ConnectionHandler` 过大 | ~1800 行 god object，难测、难演进 |
 | P3 | 几乎无自动化测试 | 回归靠手工，生产改动风险高 |
 
@@ -39,7 +39,7 @@
 2. [x] **确定性清理**：幂等 `close()`、任务登记与统一取消、固定清理顺序、清理超时
 3. [x] **可观测性**：连接数 / 拒绝数、会话生命周期、ASR/TTS/LLM 延迟与错误率、队列深度（Prometheus）
 4. [x] **安全基线（按环境）**：`development` 保留联调兼容；`production` 禁止 query token、禁止硬编码 key 兜底、默认强制 auth、AuthToken 盐值规范化。可选收紧：白名单策略
-5. [ ] **依赖韧性**：统一超时、有限重试、熔断、对设备侧友好降级话术
+5. [x] **依赖韧性**：统一失败语义、有限重试、熔断、对设备侧友好降级话术
 6. [ ] **结构拆分与测试**：拆分 `ConnectionHandler`、补连接生命周期与限流单测
 
 ---
@@ -73,6 +73,13 @@
 | `server.connection.cleanup_timeout_seconds` | 10 | 清理超时（秒） |
 | `server.metrics.enabled` | true | 是否启用 Prometheus `/metrics` |
 | `server.metrics.path` | /metrics | 指标路径（挂在 http_port） |
+| `server.resilience.enabled` | true | 是否启用上游韧性（超时/重试/熔断/降级） |
+| `server.resilience.max_retries` | 2 | 瞬时故障最大重试次数 |
+| `server.resilience.asr_timeout_seconds` | 15 | ASR 单次超时（秒） |
+| `server.resilience.tts_max_retries` | 3 | TTS 合成最大重试 |
+| `server.resilience.circuit_failure_threshold` | 5 | 熔断连续失败阈值 |
+| `server.resilience.circuit_open_seconds` | 30 | 熔断开路冷却（秒） |
+| `server.resilience.asr` / `llm` / `tts` / `tool` | （见 config.yaml） | 各阶段降级话术 |
 
 切换：用 `data/.config.yaml.remote.bak` 覆盖为 `data/.config.yaml`，填 `manager-api.url` / `secret`，重启 manager-api（执行 Liquibase）与 xiaozhi-server。  
 改参后可在【服务端管理】点「更新配置」；新上限对后续新连接生效。  
@@ -188,10 +195,12 @@
 | `core/connection.py` | 幂等 `close()`、任务跟踪、有界上报队列、确定性清理 |
 | `core/handle/reportHandle.py` | `put_nowait` + 队列满丢弃 |
 | `core/handle/receiveAudioHandle.py` | VAD resume 走 `spawn_task` |
-| `config.yaml` / `data/.config.yaml` | `server.connection`、`server.metrics` |
+| `config.yaml` / `data/.config.yaml` | `server.connection`、`server.metrics`、`server.resilience` |
 | `core/utils/metrics.py` | **新建**：Prometheus 指标封装 |
+| `core/utils/resilience.py` | **新建**：统一失败语义、熔断、降级播报 |
 | `core/http_server.py` | 暴露 `/metrics` |
-| `core/providers/asr/base.py` / `tts/base.py` | ASR/TTS 延迟与错误率 |
+| `core/providers/asr/base.py` / `tts/base.py` | ASR/TTS 延迟与错误率；ASR 超时/重试/降级；TTS 重试/熔断 |
+| `config/manage_api_client.py` | manager-api 重试叠加熔断 |
 | `scripts/ws_lifecycle_smoke.py` | A/B/C 连接生命周期冒烟 |
 
 ---
@@ -252,6 +261,40 @@ server:
 
 ---
 
+## 6.3 已落地：依赖韧性（超时 / 重试 / 熔断 / 降级）
+
+### 做了什么
+
+- **统一失败语义**：`UpstreamError(stage, kind)`，`kind` ∈ ok / timeout / unavailable / rate_limited / empty / circuit_open
+- **韧性包装**：`call_with_resilience` / `async_call_with_resilience`（超时 + 有限重试 + 熔断）
+- **设备侧降级**：
+  - ASR 失败/空识别 → `speak_degradation` 播固定短句
+  - LLM 初始化失败（此前卡 speaking）→ `enqueue_chat_degradation` 补话术 + LAST
+  - LLM 流式失败 → 同上
+  - Tool 超时 → 配置化话术（不再硬编码）
+- **TTS**：重试次数走配置；连续失败熔断开路后跳过合成
+- **manager-api**：原有重试上叠加熔断（业务异常如未绑定不计入）
+
+文件：`core/utils/resilience.py`；配置：`server.resilience`；智控台：`202607311800.sql`。
+
+### 配置示例
+
+```yaml
+server:
+  resilience:
+    enabled: true
+    max_retries: 2
+    asr_timeout_seconds: 15
+    tts_max_retries: 3
+    circuit_failure_threshold: 5
+    circuit_open_seconds: 30
+    asr: "不好意思，我没听清楚，请再说一遍。"
+    llm: "主人，小智现在有点忙，我们稍后再试吧。"
+    tool: "哎呀，网络遇到点问题，请稍后再试下！"
+```
+
+---
+
 ## 7. 如何验证
 
 1. **启动日志**应出现类似：  
@@ -264,6 +307,7 @@ server:
 4. **正常断开 / 超时断开**：日志出现 `连接资源已释放 session=... device=...`，连接水位回落
 5. **重复触发关闭**（客户端断 + 服务端 finally）：不应出现成片二次清理异常
 6. **curl 指标**：`curl http://127.0.0.1:8003/metrics | findstr xiaozhi`
+7. **降级话术**：人为让 ASR/LLM 失败时，设备应听到 `server.resilience.*` 配置的短句，且 speaking 状态能正常 stop（日志含 `降级播报` / `会话降级`）
 
 ---
 
@@ -271,8 +315,8 @@ server:
 
 1. **真 readiness**：区分 liveness / readiness（依赖、队列、连接水位）
 2. **安全收尾（可选）**：生产环境收紧设备白名单免检策略
-3. **熔断降级**：上游超时后对设备播放固定提示音/短句，避免静默挂起
-4. **单测**：至少覆盖 `ConnectionRegistry` 限流与 `close()` 幂等路径
+3. **韧性增强**：TTS 全挂时预置 opus/wav 兜底；LLM 调用侧硬超时包装；熔断指标导出 Prometheus
+4. **单测**：至少覆盖 `ConnectionRegistry` 限流、`close()` 幂等、降级入队路径
 5. **OTel traces**（第二期）：会话级链路追踪，指标仍可导出到 Prometheus
 
 ---

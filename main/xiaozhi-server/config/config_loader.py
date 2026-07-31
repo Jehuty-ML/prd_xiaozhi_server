@@ -63,7 +63,8 @@ async def get_config_from_api_async(config, default_local_server=None):
 
     合并规则：
     - 监听地址（ip/port/http_port/vision_explain/auth_key）始终以本地为准（进程绑定）
-    - server.connection：默认 YAML < 智控台 API < data/.config.yaml 显式覆盖
+    - server.connection / server.metrics / server.resilience：
+      默认 YAML < 智控台 API < data/.config.yaml 显式覆盖
     - server.auth.enabled：以 API 为准
     """
     # 初始化API客户端
@@ -159,6 +160,17 @@ async def get_config_from_api_async(config, default_local_server=None):
         merged_metrics.update(custom_server["metrics"])
     if merged_metrics:
         merged_server["metrics"] = merged_metrics
+
+    # resilience：默认 < API < 本地 data/.config.yaml 显式覆盖
+    merged_resilience = {}
+    if isinstance(default_server.get("resilience"), dict):
+        merged_resilience.update(default_server["resilience"])
+    if isinstance(api_server.get("resilience"), dict):
+        merged_resilience.update(api_server["resilience"])
+    if isinstance(custom_server.get("resilience"), dict):
+        merged_resilience.update(custom_server["resilience"])
+    if merged_resilience:
+        merged_server["resilience"] = merged_resilience
 
     config_data["server"] = merged_server
 

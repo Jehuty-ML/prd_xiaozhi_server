@@ -126,15 +126,41 @@ class ManageApiClient:
 
     @classmethod
     async def _execute_async_request(cls, method: str, endpoint: str, **kwargs) -> Dict:
-        """带重试机制的异步请求执行器"""
+        """带重试机制的异步请求执行器（叠加熔断）"""
         import asyncio
+        from core.utils.resilience import (
+            UpstreamError,
+            UpstreamKind,
+            get_circuit,
+            get_resilience_settings,
+        )
+
+        # manage-api 配置挂在 client 上；无全局 app config 时用默认 resilience
+        settings = get_resilience_settings({"server": {"resilience": {}}})
+        # 允许 manager-api 段覆盖韧性参数
+        api_cfg = cls.config or {}
+        if api_cfg.get("circuit_failure_threshold") is not None:
+            settings.circuit_failure_threshold = int(api_cfg["circuit_failure_threshold"])
+        if api_cfg.get("circuit_open_seconds") is not None:
+            settings.circuit_open_seconds = float(api_cfg["circuit_open_seconds"])
+
+        breaker = get_circuit("manage_api:default", settings)
+        if not breaker.allow():
+            raise UpstreamError(
+                "manage_api",
+                UpstreamKind.CIRCUIT_OPEN,
+                "manager-api circuit open",
+                retryable=False,
+            )
 
         retry_count = 0
 
         while retry_count <= cls.max_retries:
             try:
                 # 执行异步请求
-                return await cls._async_request(method, endpoint, **kwargs)
+                data = await cls._async_request(method, endpoint, **kwargs)
+                breaker.record_success()
+                return data
             except Exception as e:
                 # 判断是否应该重试
                 if retry_count < cls.max_retries and cls._should_retry(e):
@@ -145,7 +171,9 @@ class ManageApiClient:
                     await asyncio.sleep(cls.retry_delay)
                     continue
                 else:
-                    # 不重试，直接抛出异常
+                    # 仅传输/可重试类错误计入熔断，业务异常（如未绑定）不计入
+                    if cls._should_retry(e) or retry_count > 0:
+                        breaker.record_failure()
                     raise
 
     @classmethod
