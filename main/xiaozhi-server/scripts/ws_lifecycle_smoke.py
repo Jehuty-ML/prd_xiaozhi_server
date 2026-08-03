@@ -6,8 +6,17 @@ B: 硬上限 — 同 device 超限拒绝；可选全局超限
 C: 反复建断 — 观察 active_connections 是否回落、耗时
 
 用法:
+  # 默认：从本地/智控台配置读取 auth_key，auth 开启时自动签发 Bearer
   python scripts/ws_lifecycle_smoke.py --url ws://127.0.0.1:8000/xiaozhi/v1/ --label NEW
-  python scripts/ws_lifecycle_smoke.py --url ws://127.0.0.1:18000/xiaozhi/v1/ --label OLD --expect-no-limit
+
+  # 显式指定 auth_key（与 server.auth_key 一致）
+  python scripts/ws_lifecycle_smoke.py --auth-key YOUR_SECRET
+
+  # 服务端已关认证
+  python scripts/ws_lifecycle_smoke.py --no-auth
+
+  # 旧版无硬上限对比
+  python scripts/ws_lifecycle_smoke.py --url ws://127.0.0.1:18000/xiaozhi/v1/ --label OLD --expect-no-limit --no-auth
 """
 
 from __future__ import annotations
@@ -15,6 +24,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import statistics
 import sys
 import time
@@ -24,6 +34,12 @@ from typing import List, Optional, Tuple
 from urllib.parse import urlparse
 from urllib.request import urlopen, Request
 
+# 保证可从仓库根导入 core.*
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_SERVER_ROOT = os.path.dirname(_SCRIPT_DIR)
+if _SERVER_ROOT not in sys.path:
+    sys.path.insert(0, _SERVER_ROOT)
+
 
 @dataclass
 class CaseResult:
@@ -31,6 +47,88 @@ class CaseResult:
     passed: bool
     detail: str
     metrics: dict = field(default_factory=dict)
+
+
+@dataclass
+class SmokeAuth:
+    """WS 冒烟认证：按 client_id + device_id 签发 HMAC token。"""
+
+    enabled: bool = True
+    auth_key: Optional[str] = None
+    fixed_token: Optional[str] = None
+    source: str = "none"
+
+    def headers(self, device_id: str, client_id: str) -> dict:
+        h = {
+            "device-id": device_id,
+            "client-id": client_id,
+        }
+        if not self.enabled:
+            return h
+        if self.fixed_token:
+            h["authorization"] = f"Bearer {self.fixed_token}"
+            return h
+        if self.auth_key is not None:
+            from core.auth import AuthManager
+
+            token = AuthManager(self.auth_key).generate_token(client_id, device_id)
+            h["authorization"] = f"Bearer {token}"
+        return h
+
+
+# 由 run_all 注入
+_AUTH = SmokeAuth(enabled=False, source="unset")
+
+
+def resolve_auth_key_like_app(cfg: dict) -> str:
+    """与 app.py 一致：server.auth_key > manager-api.secret。"""
+    key = ((cfg.get("server") or {}).get("auth_key") or "").strip()
+    if not key or "你" in key:
+        key = ((cfg.get("manager-api") or {}).get("secret") or "").strip()
+    if not key or "你" in key:
+        return ""
+    return key
+
+
+async def resolve_smoke_auth(args) -> SmokeAuth:
+    if getattr(args, "no_auth", False):
+        return SmokeAuth(enabled=False, source="--no-auth")
+
+    if getattr(args, "token", None):
+        print(
+            "WARN: --token 为固定串，仅当服务端未校验 client/device 绑定或单次手测时可用；"
+            "A/B/C 多会话请优先用 --auth-key / 自动加载"
+        )
+        return SmokeAuth(
+            enabled=True, fixed_token=args.token.strip(), source="--token"
+        )
+
+    if getattr(args, "auth_key", None):
+        return SmokeAuth(
+            enabled=True, auth_key=args.auth_key.strip(), source="--auth-key"
+        )
+
+    # 自动：读配置，auth 开则签发，关则不带 Authorization
+    try:
+        from config.config_loader import load_config
+        from core.utils.runtime_env import resolve_auth_enabled
+
+        cfg = await load_config()
+        auth_on = resolve_auth_enabled(cfg)
+        if not auth_on:
+            return SmokeAuth(enabled=False, source="config:auth_disabled")
+        key = resolve_auth_key_like_app(cfg)
+        if not key:
+            print(
+                "WARN: 配置中 auth 已开启但找不到 auth_key/manager-api.secret；"
+                "请传 --auth-key"
+            )
+            return SmokeAuth(enabled=True, auth_key=None, source="config:missing_key")
+        return SmokeAuth(enabled=True, auth_key=key, source="config:auth_key")
+    except Exception as e:
+        print(f"WARN: 无法从配置加载认证信息 ({type(e).__name__}: {e})")
+        print("      可显式传 --auth-key 或 --no-auth")
+        return SmokeAuth(enabled=False, source="config:load_failed")
 
 
 def http_probe(ws_url: str, timeout: float = 3.0) -> str:
@@ -61,19 +159,12 @@ def parse_max(probe_text: str) -> Optional[int]:
     return None
 
 
-def make_headers(device_id: str, client_id: str) -> dict:
-    return {
-        "device-id": device_id,
-        "client-id": client_id,
-    }
-
-
 async def open_ws(url: str, device_id: str, client_id: str):
     import websockets
 
     return await websockets.connect(
         url,
-        additional_headers=make_headers(device_id, client_id),
+        additional_headers=_AUTH.headers(device_id, client_id),
         open_timeout=10,
         close_timeout=3,
         ping_interval=None,
@@ -104,7 +195,7 @@ async def send_hello(ws, device_id: str) -> Optional[dict]:
 async def try_open_session(url: str, device_id: str, client_id: str) -> Tuple[Optional[object], Optional[str]]:
     """尝试建立可用会话。
 
-    服务端可能在握手后立刻以 1013 关闭（硬上限）。
+    服务端可能在握手后立刻以 1013 关闭（硬上限），或以 1000 关闭（认证失败）。
     返回 (ws, reject_reason)；成功时 reject_reason 为 None。
     """
     try:
@@ -121,7 +212,12 @@ async def try_open_session(url: str, device_id: str, client_id: str) -> Tuple[Op
             await ws.close()
         except Exception:
             pass
-        return None, f"closed_after_handshake code={close_code} reason={reason}"
+        hint = ""
+        if close_code in (1000, 1008) and _AUTH.enabled and not _AUTH.auth_key and not _AUTH.fixed_token:
+            hint = " (可能缺 auth_key，请传 --auth-key)"
+        elif close_code in (1000, 1008) and not _AUTH.enabled:
+            hint = " (服务端可能仍开启 auth，去掉 --no-auth 或提供 --auth-key)"
+        return None, f"closed_after_handshake code={close_code} reason={reason}{hint}"
 
     # 再探活：已关闭的连接 send/ping 会失败
     try:
@@ -364,6 +460,7 @@ def print_report(label: str, url: str, results: List[CaseResult]) -> int:
     print("=" * 72)
     print(f"LABEL={label}")
     print(f"URL={url}")
+    print(f"AUTH={_AUTH.source} enabled={_AUTH.enabled}")
     try:
         probe = http_probe(url)
         print("--- HTTP probe ---")
@@ -384,6 +481,10 @@ def print_report(label: str, url: str, results: List[CaseResult]) -> int:
 
 
 async def run_all(args) -> int:
+    global _AUTH
+    _AUTH = await resolve_smoke_auth(args)
+    print(f"Smoke auth: source={_AUTH.source} enabled={_AUTH.enabled}")
+
     results: List[CaseResult] = []
     results.append(await case_a(args.url))
     results.append(
@@ -426,6 +527,21 @@ def main():
         "--expect-no-limit",
         action="store_true",
         help="Old build: expect connections are NOT rejected by limits",
+    )
+    parser.add_argument(
+        "--auth-key",
+        default=None,
+        help="server.auth_key，用于按 client_id+device_id 签发 Bearer token",
+    )
+    parser.add_argument(
+        "--token",
+        default=None,
+        help="固定 Bearer token（多会话场景不推荐；优先 --auth-key）",
+    )
+    parser.add_argument(
+        "--no-auth",
+        action="store_true",
+        help="不发送 Authorization（仅当服务端 auth.enabled=false）",
     )
     args = parser.parse_args()
     try:
