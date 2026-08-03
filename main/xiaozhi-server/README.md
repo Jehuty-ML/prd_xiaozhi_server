@@ -40,7 +40,7 @@
 3. [x] **可观测性**：连接数 / 拒绝数、会话生命周期、ASR/TTS/LLM 延迟与错误率、队列深度（Prometheus）
 4. [x] **安全基线（按环境）**：`development` 保留联调兼容；`production` 禁止 query token、禁止硬编码 key 兜底、默认强制 auth、AuthToken 盐值规范化。可选收紧：白名单策略
 5. [x] **依赖韧性**：统一失败语义、有限重试、熔断、对设备侧友好降级话术
-6. [ ] **结构拆分与测试**：拆分 `ConnectionHandler`、补连接生命周期与限流单测
+6. [ ] **（可选）网关单测**：连接准入/回收与限流行为单测；大拆 `ConnectionHandler` 让位于微服务边界切割，不必先做
 
 ---
 
@@ -314,15 +314,6 @@ server:
 2. `/metrics` 含 `xiaozhi_circuit_state`、`xiaozhi_degraded_total`、`xiaozhi_overload_shed_total`
 3. 主备皆失败或过载时设备仍能听到提示并正常 stop
 
-### 刻意未做 / 本轮已补
-
-- ~~多实例共享熔断（Redis）~~ → **已落地**（`server.resilience.redis`，默认关；连不上回退本地）
-- ~~全量 adapter 边界强制抛 `UpstreamError`~~ → **已落地关键路径**（ASR wrapper 上抛、LLM `response_*_safe`、TTS/`as_upstream_error`；各家 adapter 逐步迁移）
-- OTel / SkyWalking → **不做**：已有 Prometheus 指标；链路追踪等有跨服务排障痛点再加
-- ~~专用 `tts_fallback.wav`~~ → **已提供** `config/assets/tts_fallback.wav`
-- 单测 → **已提供** `tests/test_resilience.py`、`scripts/resilience_verify.py`
-- 连接冒烟 auth → **已补** `scripts/ws_lifecycle_smoke.py` 自动签 token
-
 ### 本轮新增配置
 
 ```yaml
@@ -355,12 +346,18 @@ server:
 
 ---
 
-## 8. 后续建议（未做）
+## 8. 后续建议
 
-1. **真 readiness**：区分 liveness / readiness（依赖、队列、连接水位）
-2. **安全收尾（可选）**：生产环境收紧设备白名单免检策略
-3. **结构拆分与测试**：拆分 `ConnectionHandler`、补连接生命周期与限流单测
-4. **各家 adapter 内源抛 `UpstreamError`**：减少空串/None 冒充失败
+生产级单体改造（上限 / 清理 / 可观测 / 安全 / 韧性）已完成。后续优先按**微服务拆分**推进，而不是先大拆 `ConnectionHandler`。
+
+仍可按需补齐（与拆分并行即可）：
+
+1. **真 readiness**：区分 liveness / readiness（依赖、队列、连接水位）——拆成多服务后更有价值
+2. **网关单测（可选）**：连接准入/回收与限流；韧性已有 `tests/test_resilience.py`
+3. **安全收尾（可选）**：生产环境收紧设备白名单免检策略
+4. **adapter 失败语义（渐进）**：各家 ASR/TTS/LLM 内源统一抛 `UpstreamError`（关键路径已接好）
+
+不做：OTel / SkyWalking（已有 Prometheus；跨服务排障痛点再加）
 
 ---
 
