@@ -514,8 +514,11 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   position: relative;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   min-height: 100vh;
+  max-width: 480px;
+  margin: 0 auto;
 
   &::before {
     content: '';
@@ -526,6 +529,7 @@ onMounted(async () => {
     height: 200%;
     background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
     animation: float 6s ease-in-out infinite;
+    pointer-events: none;
   }
 }
 
@@ -541,11 +545,10 @@ onMounted(async () => {
 
 .header {
   flex: 0 0 auto;
-  min-height: 280rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 15% 0 40rpx 0;
+  padding: 48px 0 24px 0;
   position: relative;
 
   .back-button {
@@ -609,11 +612,11 @@ onMounted(async () => {
     background: rgba(255, 255, 255, 0.95);
     border-radius: 24rpx;
     padding: 40rpx 30rpx 30rpx 30rpx;
-    backdrop-filter: blur(10rpx);
+    backdrop-filter: blur(10px);
     box-shadow: 0 20rpx 60rpx rgba(0, 0, 0, 0.1);
     border: 1rpx solid rgba(255, 255, 255, 0.2);
-    max-height: calc(100vh - 350rpx);
-    overflow-y: auto;
+    max-height: none;
+    overflow-y: visible;
 
     .input-group {
       margin-bottom: 24rpx;

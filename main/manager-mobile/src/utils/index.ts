@@ -1,7 +1,7 @@
 import smCrypto from 'sm-crypto'
 import { pages, subPackages } from '@/pages.json'
 
-import { isMpWeixin } from './platform'
+import { isH5, isMpWeixin } from './platform'
 
 /**
  * 运行时服务端地址覆盖存储键
@@ -138,6 +138,11 @@ export function getEnvBaseUrl() {
 
   // 请求基准地址（默认来源于 env）
   let baseUrl = import.meta.env.VITE_SERVER_BASEURL
+
+  // H5 开发开启代理时走同源前缀，验证码图片等也能通过 Vite 代理加载
+  if (isH5 && import.meta.env.DEV && __VITE_APP_PROXY__ === 'true') {
+    baseUrl = import.meta.env.VITE_APP_PROXY_PREFIX
+  }
 
   // # 有些同学可能需要在微信小程序里面根据 develop、trial、release 分别设置上传地址，参考代码如下。
   const VITE_SERVER_BASEURL__WEIXIN_DEVELOP = 'https://ukw0y1.laf.run'
