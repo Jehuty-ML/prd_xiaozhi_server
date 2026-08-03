@@ -129,8 +129,13 @@ class TTSProviderBase(ABC):
         return getattr(self.conn, "config", None) if self.conn else None
 
     def _tts_retry_budget(self) -> int:
+        from core.utils.resilience import get_provider_policy, get_resilience_settings
+
         settings = get_resilience_settings(self._resilience_conn_config())
-        return max(1, settings.tts_max_retries)
+        cfg = self._resilience_conn_config() or {}
+        name = (cfg.get("selected_module") or {}).get("TTS") or "default"
+        policy = get_provider_policy(cfg, "tts", name)
+        return max(1, int(policy.get("max_retries", settings.tts_max_retries)))
 
     def _tts_circuit(self):
         from core.utils import metrics as metrics_mod
@@ -146,13 +151,43 @@ class TTSProviderBase(ABC):
         if breaker:
             breaker.record_success()
 
-    def _on_tts_failure(self, original_text: str):
+    def _on_tts_failure(self, original_text: str, opus_handler: Callable[[bytes], None] = None):
         breaker = self._tts_circuit()
         if breaker:
             breaker.record_failure()
         logger.bind(tag=TAG).error(
             f"语音生成失败: {original_text}，请检查网络或服务是否正常"
         )
+        self._play_tts_fallback_audio(original_text, opus_handler)
+
+    def _play_tts_fallback_audio(
+        self, original_text: str, opus_handler: Callable[[bytes], None] = None
+    ) -> bool:
+        """TTS API 失败/熔断时播放本地预置音，不依赖 text_to_speak。"""
+        import os
+        from core.utils.resilience import resolve_tts_fallback_audio
+
+        path = resolve_tts_fallback_audio(self._resilience_conn_config())
+        if not path or not os.path.isfile(path):
+            logger.bind(tag=TAG).warning("TTS 预置音未配置或文件不存在，无法兜底")
+            return False
+        try:
+            display = original_text or "服务繁忙"
+            self.tts_audio_queue.put(
+                (
+                    SentenceType.FIRST,
+                    None,
+                    display,
+                    getattr(self, "current_sentence_id", None),
+                )
+            )
+            handler = opus_handler or self.handle_opus
+            self._process_audio_file_stream(path, callback=handler)
+            logger.bind(tag=TAG).info(f"TTS 预置音兜底已播放: {path}")
+            return True
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"TTS 预置音播放失败: {e}")
+            return False
 
     def to_tts_stream(self, text, opus_handler: Callable[[bytes], None] = None) -> None:
         # 保留原始文本用于显示/上报
@@ -165,8 +200,18 @@ class TTSProviderBase(ABC):
         breaker = self._tts_circuit()
         if breaker and not breaker.allow():
             logger.bind(tag=TAG).warning(
-                f"TTS 熔断开路，跳过合成: {original_text}"
+                f"TTS 熔断开路，使用预置音: {original_text}"
             )
+            self._play_tts_fallback_audio(original_text, opus_handler)
+            return None
+
+        try:
+            from core.utils.resilience import maybe_chaos_fail
+
+            maybe_chaos_fail("tts", self._resilience_conn_config())
+        except Exception as chaos_err:
+            logger.bind(tag=TAG).warning(f"TTS 混沌注入: {chaos_err}")
+            self._on_tts_failure(original_text, opus_handler)
             return None
 
         max_repeat_time = self._tts_retry_budget()
@@ -191,8 +236,11 @@ class TTSProviderBase(ABC):
                     else:
                         max_repeat_time -= 1
                 except Exception as e:
+                    from core.utils.resilience import as_upstream_error
+
+                    err = as_upstream_error("tts", e)
                     logger.bind(tag=TAG).warning(
-                        f"语音生成失败{initial_retries - max_repeat_time + 1}次: {original_text}，错误: {e}"
+                        f"语音生成失败{initial_retries - max_repeat_time + 1}次: {original_text}，错误: {err.kind.value} {err}"
                     )
                     max_repeat_time -= 1
             if max_repeat_time > 0:
@@ -201,7 +249,7 @@ class TTSProviderBase(ABC):
                     f"语音生成成功: {original_text}，重试{initial_retries - max_repeat_time}次"
                 )
             else:
-                self._on_tts_failure(original_text)
+                self._on_tts_failure(original_text, opus_handler)
             return None
         else:
             tmp_file = self.generate_filename()
@@ -226,14 +274,16 @@ class TTSProviderBase(ABC):
                     self.tts_audio_queue.put((SentenceType.FIRST, None, original_text, getattr(self, 'current_sentence_id', None)))
                     self._process_audio_file_stream(tmp_file, callback=opus_handler)
                 else:
-                    self._on_tts_failure(original_text)
+                    self._on_tts_failure(original_text, opus_handler)
             except Exception as e:
                 logger.bind(tag=TAG).error(f"Failed to generate TTS file: {e}")
-                self._on_tts_failure(original_text)
+                self._on_tts_failure(original_text, opus_handler)
                 return None
     
     def to_tts(self, text):
         from core.utils import metrics as metrics_mod
+        from core.utils.resilience import resolve_tts_fallback_audio
+        import os as _os
 
         # 保留原始文本用于日志/显示
         original_text = text
@@ -252,7 +302,9 @@ class TTSProviderBase(ABC):
                 0.0,
                 status="error",
             )
-            return None
+            # to_tts 返回文件路径/音频列表供调用方使用；熔断时尽量返回预置文件路径
+            path = resolve_tts_fallback_audio(self._resilience_conn_config())
+            return path if path and _os.path.isfile(path) else None
 
         max_repeat_time = self._tts_retry_budget()
         initial_retries = max_repeat_time
@@ -292,6 +344,10 @@ class TTSProviderBase(ABC):
                     )
                 else:
                     self._on_tts_failure(original_text)
+                    path = resolve_tts_fallback_audio(self._resilience_conn_config())
+                    if path and _os.path.isfile(path):
+                        status = "ok"
+                        result = path
                 return result
             else:
                 tmp_file = self.generate_filename()
@@ -317,11 +373,19 @@ class TTSProviderBase(ABC):
                         result = tmp_file
                     else:
                         self._on_tts_failure(original_text)
+                        path = resolve_tts_fallback_audio(self._resilience_conn_config())
+                        if path and _os.path.isfile(path):
+                            status = "ok"
+                            result = path
 
                     return result
                 except Exception as e:
                     logger.bind(tag=TAG).error(f"Failed to generate TTS file: {e}")
                     self._on_tts_failure(original_text)
+                    path = resolve_tts_fallback_audio(self._resilience_conn_config())
+                    if path and _os.path.isfile(path):
+                        status = "ok"
+                        return path
                     return None
         finally:
             metrics_mod.observe_provider(
@@ -472,6 +536,16 @@ class TTSProviderBase(ABC):
                     self._process_remaining_text_stream(opus_handler=self.handle_opus)
                     tts_file = message.content_file
                     if tts_file and os.path.exists(tts_file):
+                        # 预置音/本地文件：补 FIRST 以触发 sentence_start
+                        if self.tts_audio_first_sentence:
+                            self.tts_audio_queue.put(
+                                (
+                                    SentenceType.FIRST,
+                                    None,
+                                    message.content_detail,
+                                    message.sentence_id,
+                                )
+                            )
                         self._process_audio_file_stream(
                             tts_file, callback=self.handle_opus
                         )

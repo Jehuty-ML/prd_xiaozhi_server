@@ -114,15 +114,29 @@ class ASRProviderBase(ABC):
 
             # 记录识别结果 - 检查是否为异常
             asr_failed = False
+            asr_kind = None
             if isinstance(asr_result, Exception):
-                logger.bind(tag=TAG).error(f"ASR识别失败: {asr_result}")
+                from core.utils.resilience import UpstreamError, UpstreamKind
+
                 raw_text = ""
                 asr_failed = True
+                if isinstance(asr_result, UpstreamError):
+                    asr_kind = asr_result.kind
+                    if asr_kind == UpstreamKind.EMPTY:
+                        logger.bind(tag=TAG).info(f"ASR 空识别: {asr_result}")
+                    else:
+                        logger.bind(tag=TAG).error(f"ASR识别失败: {asr_result}")
+                else:
+                    asr_kind = UpstreamKind.UNAVAILABLE
+                    logger.bind(tag=TAG).error(f"ASR识别失败: {asr_result}")
             else:
                 raw_text, _ = asr_result
                 if raw_text is None:
                     raw_text = ""
                     asr_failed = True
+                    from core.utils.resilience import UpstreamKind
+
+                    asr_kind = UpstreamKind.EMPTY
 
             if isinstance(voiceprint_result, Exception):
                 logger.bind(tag=TAG).error(f"声纹识别失败: {voiceprint_result}")
@@ -179,7 +193,7 @@ class ASRProviderBase(ABC):
                 # 有音频但无识别文本：对设备播报降级话术，避免静默
                 from core.utils.resilience import UpstreamKind, speak_degradation
 
-                kind = (
+                kind = asr_kind or (
                     UpstreamKind.UNAVAILABLE
                     if asr_failed
                     else UpstreamKind.EMPTY
@@ -296,6 +310,7 @@ class ASRProviderBase(ABC):
             UpstreamError,
             UpstreamKind,
             async_call_with_resilience,
+            get_provider_policy,
             get_resilience_settings,
         )
 
@@ -314,6 +329,16 @@ class ASRProviderBase(ABC):
                 conn_config = None
 
         settings = get_resilience_settings(conn_config)
+        # 策略表优先用 selected_module.ASR 名
+        asr_name = provider
+        try:
+            asr_name = (conn_config or {}).get("selected_module", {}).get("ASR") or provider
+        except Exception:
+            pass
+        policy = get_provider_policy(conn_config, "asr", asr_name)
+        asr_timeout = float(policy.get("timeout_seconds") or settings.asr_timeout_seconds)
+        asr_retries = int(policy.get("max_retries", settings.max_retries))
+        asr_delay = float(policy.get("retry_delay_seconds", settings.retry_delay_seconds))
         try:
             combined_pcm_data = b"".join(pcm_data)
 
@@ -347,25 +372,37 @@ class ASRProviderBase(ABC):
                 _do_asr,
                 config=conn_config,
                 provider=provider,
-                timeout=settings.asr_timeout_seconds,
-                max_retries=settings.max_retries,
-                retry_delay=settings.retry_delay_seconds,
+                timeout=asr_timeout,
+                max_retries=asr_retries,
+                retry_delay=asr_delay,
             )
-            if not text:
+            # 空识别：向上抛 EMPTY，由会话层降级；不吞成 (None, None)
+            if not text or (isinstance(text, str) and not text.strip()):
                 status = "empty"
+                raise UpstreamError(
+                    "asr",
+                    UpstreamKind.EMPTY,
+                    "empty asr result",
+                    retryable=False,
+                )
             return text, file_path
         except UpstreamError as e:
             status = "empty" if e.kind == UpstreamKind.EMPTY else "error"
-            logger.bind(tag=TAG).error(f"语音识别失败: {e.kind.value} {e}")
-            return None, None
+            if e.kind != UpstreamKind.EMPTY:
+                logger.bind(tag=TAG).error(f"语音识别失败: {e.kind.value} {e}")
+            raise
         except OSError as e:
             status = "error"
             logger.bind(tag=TAG).error(f"文件操作错误: {e}")
-            return None, None
+            from core.utils.resilience import as_upstream_error
+
+            raise as_upstream_error("asr", e) from e
         except Exception as e:
             status = "error"
             logger.bind(tag=TAG).error(f"语音识别失败: {e}")
-            return None, None
+            from core.utils.resilience import as_upstream_error
+
+            raise as_upstream_error("asr", e) from e
         finally:
             metrics_mod.observe_provider(
                 "asr", provider, time.perf_counter() - t0, status=status

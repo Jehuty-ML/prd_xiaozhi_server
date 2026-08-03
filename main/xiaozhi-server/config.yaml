@@ -75,18 +75,61 @@ server:
     retry_delay_seconds: 0.5
     # 各阶段超时 / TTS 重试
     asr_timeout_seconds: 15
-    llm_timeout_seconds: 60
+    llm_timeout_seconds: 90
     tts_max_retries: 3
     tts_retry_delay_seconds: 0.3
+    # 预算：TTFB=首 token（可感知）；round=整轮含流式输出（不是 ASR+LLM+TTS≤8s）
+    llm_ttfb_deadline_seconds: 25
+    round_deadline_seconds: 120
+    # 过载背压：水位过高时新对话直接降级
+    overload:
+      enabled: true
+      connection_usage_threshold: 0.85
+      tts_text_queue_threshold: 80
+      tts_audio_queue_threshold: 120
+      report_queue_usage_threshold: 0.9
+    # 按 stage/provider 覆盖（键名同 selected_module / LLM 段）
+    providers:
+      asr: {}
+      # 示例:
+      # llm:
+      #   ChatGLMLLM: { timeout_seconds: 90, max_retries: 1 }
+      #   default: { timeout_seconds: 60 }
+      llm: {}
+      tts: {}
     # 熔断：连续失败达阈值后开路，冷却后再半开探测
     circuit_failure_threshold: 5
     circuit_open_seconds: 30
+    # 多实例共享熔断（可选 Redis；默认关，连不上时回退本地）
+    redis:
+      enabled: false
+      # url: redis://:password@127.0.0.1:6379/1  # 若设置则优先于 host/port
+      host: 127.0.0.1
+      port: 6379
+      password: ""
+      db: 1
+      key_prefix: "xiaozhi:circuit:"
+      fallback_local: true
+      socket_timeout: 1.0
+    # 高级：LLM 主备（填 LLM 段里的配置名，空=关闭；勿与 selected_module.LLM 相同）
+    llm_fallback: ""
+    # 高级：TTS 失败/降级时播放的本地预置音（不依赖 TTS API）
+    tts_fallback_audio: config/assets/tts_fallback.wav
+    # 会话/ASR 降级话术是否优先走预置音（true 时不调用 text_to_speak）
+    use_tts_fallback_on_degrade: true
+    # 混沌注入（仅联调；生产必须 enabled: false）
+    chaos:
+      enabled: false
+      asr_fail_rate: 0.0
+      llm_fail_rate: 0.0
+      tts_fail_rate: 0.0
     # 降级话术（按阶段）；未配 llm 时回退到顶层 system_error_response
     asr: "不好意思，我没听清楚，请再说一遍。"
     asr_empty: "不好意思，我没听清楚，请再说一遍。"
     llm: "主人，小智现在有点忙，我们稍后再试吧。"
     tts: "抱歉，我暂时说不出话，请稍后再试。"
     tool: "哎呀，网络遇到点问题，请稍后再试下！"
+    overload: "现在有点忙不过来，请稍后再试一下。"
 log:
   # 设置控制台输出的日志格式，时间、日志级别、标签、消息
   log_format: "<green>{time:YYMMDD HH:mm:ss}</green>[{version}_{selected_module}][<light-blue>{extra[tag]}</light-blue>]-<level>{level}</level>-<light-green>{message}</light-green>"

@@ -80,6 +80,9 @@
 | `server.resilience.circuit_failure_threshold` | 5 | 熔断连续失败阈值 |
 | `server.resilience.circuit_open_seconds` | 30 | 熔断开路冷却（秒） |
 | `server.resilience.asr` / `llm` / `tts` / `tool` | （见 config.yaml） | 各阶段降级话术 |
+| `server.resilience.llm_fallback` | （空） | 备用 LLM 配置名（`LLM` 段键） |
+| `server.resilience.tts_fallback_audio` | `config/assets/wakeup_words_short.wav` | TTS/降级预置音路径 |
+| `server.resilience.use_tts_fallback_on_degrade` | true | 降级是否优先播预置音 |
 
 切换：用 `data/.config.yaml.remote.bak` 覆盖为 `data/.config.yaml`，填 `manager-api.url` / `secret`，重启 manager-api（执行 Liquibase）与 xiaozhi-server。  
 改参后可在【服务端管理】点「更新配置」；新上限对后续新连接生效。  
@@ -220,6 +223,9 @@
 | `xiaozhi_provider_latency_seconds{component,provider}` | Histogram | 端到端耗时 |
 | `xiaozhi_provider_ttfb_seconds{component,provider}` | Histogram | LLM 首 token 时延 |
 | `xiaozhi_queue_depth{queue}` | Gauge | `report` / `tts_text` / `tts_audio` 队列深度 |
+| `xiaozhi_circuit_state{name}` | Gauge | 熔断状态 0=closed / 1=half_open / 2=open |
+| `xiaozhi_degraded_total{stage,kind}` | Counter | 降级/预置音事件 |
+| `xiaozhi_overload_shed_total{reason}` | Counter | 过载丢弃的新对话轮次 |
 
 ### 配置
 
@@ -265,17 +271,18 @@ server:
 
 ### 做了什么
 
-- **统一失败语义**：`UpstreamError(stage, kind)`，`kind` ∈ ok / timeout / unavailable / rate_limited / empty / circuit_open
-- **韧性包装**：`call_with_resilience` / `async_call_with_resilience`（超时 + 有限重试 + 熔断）
-- **设备侧降级**：
-  - ASR 失败/空识别 → `speak_degradation` 播固定短句
-  - LLM 初始化失败（此前卡 speaking）→ `enqueue_chat_degradation` 补话术 + LAST
-  - LLM 流式失败 → 同上
-  - Tool 超时 → 配置化话术（不再硬编码）
-- **TTS**：重试次数走配置；连续失败熔断开路后跳过合成
-- **manager-api**：原有重试上叠加熔断（业务异常如未绑定不计入）
+- **统一失败语义**：`UpstreamError(stage, kind)`，含 timeout / overload / circuit_open 等
+- **韧性包装**：超时 + 有限重试 + 熔断；`providers.<stage>.<name>` 可覆盖单 provider 策略
+- **设备侧降级**：ASR/LLM/Tool 失败 → 话术或预置音；过载时新对话直接降级
+- **TTS 预置音**：合成失败/熔断播本地文件
+- **LLM fallback**：主模型未开口失败时切备用
+- **单轮预算**：
+  - `llm_ttfb_deadline_seconds`（默认 25s）：首 token，不是整轮 8s
+  - `round_deadline_seconds`（默认 120s）：整轮含流式输出，超时收尾/降级
+- **过载背压**：连接水位 / TTS 队列 / 上报队列超阈值 → `speak_degradation(overload)`
+- **指标**：`xiaozhi_circuit_state`、`xiaozhi_degraded_total`、`xiaozhi_overload_shed_total`
 
-文件：`core/utils/resilience.py`；配置：`server.resilience`；智控台：`202607311800.sql`。
+文件：`core/utils/resilience.py`、`core/utils/metrics.py`；智控台：`202607311800/1830/1900.sql`。
 
 ### 配置示例
 
@@ -283,14 +290,51 @@ server:
 server:
   resilience:
     enabled: true
-    max_retries: 2
-    asr_timeout_seconds: 15
-    tts_max_retries: 3
-    circuit_failure_threshold: 5
-    circuit_open_seconds: 30
+    llm_ttfb_deadline_seconds: 25   # 首 token
+    round_deadline_seconds: 120     # 整轮
+    llm_fallback: DoubaoLLM
+    tts_fallback_audio: config/assets/wakeup_words_short.wav
+    use_tts_fallback_on_degrade: true
+    overload:
+      enabled: true
+      connection_usage_threshold: 0.85
+      tts_text_queue_threshold: 80
+    providers:
+      llm:
+        ChatGLMLLM: { timeout_seconds: 90 }
+        default: { timeout_seconds: 60 }
     asr: "不好意思，我没听清楚，请再说一遍。"
     llm: "主人，小智现在有点忙，我们稍后再试吧。"
-    tool: "哎呀，网络遇到点问题，请稍后再试下！"
+    overload: "现在有点忙不过来，请稍后再试一下。"
+```
+
+### 验证要点
+
+1. 日志：`TTS 预置音` / `LLM 已切换到 fallback` / `过载降级` / `单轮预算耗尽`
+2. `/metrics` 含 `xiaozhi_circuit_state`、`xiaozhi_degraded_total`、`xiaozhi_overload_shed_total`
+3. 主备皆失败或过载时设备仍能听到提示并正常 stop
+
+### 刻意未做 / 本轮已补
+
+- ~~多实例共享熔断（Redis）~~ → **已落地**（`server.resilience.redis`，默认关；连不上回退本地）
+- ~~全量 adapter 边界强制抛 `UpstreamError`~~ → **已落地关键路径**（ASR wrapper 上抛、LLM `response_*_safe`、TTS/`as_upstream_error`；各家 adapter 逐步迁移）
+- OTel / SkyWalking → **不做**：已有 Prometheus 指标；链路追踪等有跨服务排障痛点再加
+- ~~专用 `tts_fallback.wav`~~ → **已提供** `config/assets/tts_fallback.wav`
+- 单测 → **已提供** `tests/test_resilience.py`、`scripts/resilience_verify.py`
+- 连接冒烟 auth → **已补** `scripts/ws_lifecycle_smoke.py` 自动签 token
+
+### 本轮新增配置
+
+```yaml
+server:
+  resilience:
+    redis:
+      enabled: false          # 多实例共享熔断
+      host: 127.0.0.1
+      port: 6379
+      db: 1                   # 建议与 manager-api 的 0 隔离
+      key_prefix: "xiaozhi:circuit:"
+      fallback_local: true
 ```
 
 ---
@@ -315,9 +359,8 @@ server:
 
 1. **真 readiness**：区分 liveness / readiness（依赖、队列、连接水位）
 2. **安全收尾（可选）**：生产环境收紧设备白名单免检策略
-3. **韧性增强**：TTS 全挂时预置 opus/wav 兜底；LLM 调用侧硬超时包装；熔断指标导出 Prometheus
-4. **单测**：至少覆盖 `ConnectionRegistry` 限流、`close()` 幂等、降级入队路径
-5. **OTel traces**（第二期）：会话级链路追踪，指标仍可导出到 Prometheus
+3. **结构拆分与测试**：拆分 `ConnectionHandler`、补连接生命周期与限流单测
+4. **各家 adapter 内源抛 `UpstreamError`**：减少空串/None 冒充失败
 
 ---
 

@@ -23,6 +23,9 @@ provider_latency_seconds = None
 provider_ttfb_seconds = None
 queue_depth = None
 ws_max_connections = None
+circuit_state = None
+degraded_total = None
+overload_shed_total = None
 
 
 def init_metrics(config: Optional[dict] = None) -> bool:
@@ -31,7 +34,7 @@ def init_metrics(config: Optional[dict] = None) -> bool:
     global ws_active, ws_rejected_total, ws_sessions_opened_total
     global ws_session_duration_seconds, provider_requests_total
     global provider_latency_seconds, provider_ttfb_seconds, queue_depth
-    global ws_max_connections
+    global ws_max_connections, circuit_state, degraded_total, overload_shed_total
 
     if _INITIALIZED:
         return _ENABLED
@@ -80,18 +83,33 @@ def init_metrics(config: Optional[dict] = None) -> bool:
         "xiaozhi_provider_latency_seconds",
         "Upstream provider end-to-end latency",
         ["component", "provider"],
-        buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 3, 5, 8, 15, 30),
+        buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 3, 5, 8, 15, 30, 60, 120),
     )
     provider_ttfb_seconds = Histogram(
         "xiaozhi_provider_ttfb_seconds",
         "Upstream provider time to first token/byte",
         ["component", "provider"],
-        buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 3, 5, 8, 15),
+        buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 3, 5, 8, 15, 30),
     )
     queue_depth = Gauge(
         "xiaozhi_queue_depth",
         "In-process queue depth",
         ["queue"],
+    )
+    circuit_state = Gauge(
+        "xiaozhi_circuit_state",
+        "Circuit breaker state (0=closed, 1=half_open, 2=open)",
+        ["name"],
+    )
+    degraded_total = Counter(
+        "xiaozhi_degraded_total",
+        "Degradation / fallback events",
+        ["stage", "kind"],
+    )
+    overload_shed_total = Counter(
+        "xiaozhi_overload_shed_total",
+        "Turns shed due to overload backpressure",
+        ["reason"],
     )
 
     # 同步配置上限
@@ -166,6 +184,34 @@ def observe_provider(
 def set_queue_depth(queue_name: str, depth: int) -> None:
     if _ENABLED and queue_depth is not None:
         queue_depth.labels(queue=queue_name).set(max(0, int(depth)))
+
+
+_CIRCUIT_STATE_VALUES = {"closed": 0, "half_open": 1, "open": 2}
+
+
+def set_circuit_state(name: str, state: str) -> None:
+    if not _ENABLED or circuit_state is None:
+        return
+    label = (name or "unknown")[:64]
+    value = _CIRCUIT_STATE_VALUES.get(state, 0)
+    circuit_state.labels(name=label).set(value)
+
+
+def observe_degraded(stage: str, kind: str) -> None:
+    if not _ENABLED or degraded_total is None:
+        return
+    degraded_total.labels(
+        stage=(stage or "unknown")[:32],
+        kind=(kind or "unknown")[:32],
+    ).inc()
+
+
+def observe_overload_shed(reason: str) -> None:
+    if not _ENABLED or overload_shed_total is None:
+        return
+    # 归一化，避免高基数
+    r = (reason or "unknown").split("=")[0][:32]
+    overload_shed_total.labels(reason=r).inc()
 
 
 @contextmanager

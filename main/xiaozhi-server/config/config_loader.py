@@ -161,14 +161,20 @@ async def get_config_from_api_async(config, default_local_server=None):
     if merged_metrics:
         merged_server["metrics"] = merged_metrics
 
-    # resilience：默认 < API < 本地 data/.config.yaml 显式覆盖
+    # resilience：默认 < API < 本地 data/.config.yaml 显式覆盖（嵌套段深合并）
     merged_resilience = {}
     if isinstance(default_server.get("resilience"), dict):
-        merged_resilience.update(default_server["resilience"])
+        merged_resilience = merge_configs(
+            merged_resilience, default_server["resilience"]
+        )
     if isinstance(api_server.get("resilience"), dict):
-        merged_resilience.update(api_server["resilience"])
+        merged_resilience = merge_configs(
+            merged_resilience, api_server["resilience"]
+        )
     if isinstance(custom_server.get("resilience"), dict):
-        merged_resilience.update(custom_server["resilience"])
+        merged_resilience = merge_configs(
+            merged_resilience, custom_server["resilience"]
+        )
     if merged_resilience:
         merged_server["resilience"] = merged_resilience
 
