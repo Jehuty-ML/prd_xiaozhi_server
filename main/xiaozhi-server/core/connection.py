@@ -46,12 +46,17 @@ from core.utils.voiceprint_provider import VoiceprintProvider
 from core.utils import textUtils
 from core.utils import metrics as metrics_mod
 from core.utils.resilience import (
+    UpstreamError,
     UpstreamKind,
+    RoundBudget,
+    check_system_overload,
     classify_exception,
     enqueue_chat_degradation,
     get_circuit,
     get_fallback_text,
+    get_provider_policy,
     get_resilience_settings,
+    next_with_timeout,
 )
 
 
@@ -158,6 +163,8 @@ class ConnectionHandler:
         self._asr = _asr
         self._vad = _vad
         self.llm = _llm
+        self.llm_fallback = None
+        self.llm_fallback_name = None
         self.memory = _memory
         self.intent = _intent
 
@@ -691,6 +698,8 @@ class ConnectionHandler:
             self._initialize_memory()
             """加载意图识别"""
             self._initialize_intent()
+            """LLM 备用实例（resilience.llm_fallback）"""
+            self._ensure_llm_fallback()
             """初始化上报线程"""
             self._init_report_threads()
             """更新系统提示词"""
@@ -978,10 +987,195 @@ class ConnectionHandler:
             self.asr = modules["asr"]
         if modules.get("llm", None) is not None:
             self.llm = modules["llm"]
+            self.llm_fallback = None
+            self.llm_fallback_name = None
         if modules.get("intent", None) is not None:
             self.intent = modules["intent"]
         if modules.get("memory", None) is not None:
             self.memory = modules["memory"]
+
+    def _ensure_llm_fallback(self):
+        """按 server.resilience.llm_fallback 创建备用 LLM（配置键名同 LLM 段）。"""
+        settings = get_resilience_settings(self.config)
+        name = settings.llm_fallback
+        if not name:
+            self.llm_fallback = None
+            self.llm_fallback_name = None
+            return
+        primary_name = (self.config.get("selected_module") or {}).get("LLM")
+        if name == primary_name:
+            self.logger.bind(tag=TAG).warning(
+                f"llm_fallback={name} 与主 LLM 相同，已忽略"
+            )
+            self.llm_fallback = None
+            self.llm_fallback_name = None
+            return
+        llm_cfgs = self.config.get("LLM") or {}
+        if name not in llm_cfgs:
+            self.logger.bind(tag=TAG).warning(
+                f"llm_fallback={name} 不在 LLM 配置中，已忽略"
+            )
+            self.llm_fallback = None
+            self.llm_fallback_name = None
+            return
+        if self.llm_fallback_name == name and self.llm_fallback is not None:
+            return
+        try:
+            from core.utils import llm as llm_utils
+
+            cfg = llm_cfgs[name]
+            self.llm_fallback = llm_utils.create_instance(cfg.get("type", name), cfg)
+            self.llm_fallback_name = name
+            self.logger.bind(tag=TAG).info(
+                f"已加载 LLM fallback: {name}, 类型: {cfg.get('type', name)}"
+            )
+        except Exception as e:
+            self.llm_fallback = None
+            self.llm_fallback_name = None
+            self.logger.bind(tag=TAG).error(f"创建 LLM fallback 失败: {name}, {e}")
+
+    def _iter_llm_with_fallback(
+        self, memory_str, functions, speaker_for_system, budget: RoundBudget = None
+    ):
+        """主 LLM 失败且尚未产出内容时，切换到 fallback 再试。
+
+        已开始流式输出后不再切换，避免半截答案拼到另一模型。
+        """
+        self._ensure_llm_fallback()
+        dialogue = self.dialogue.get_llm_dialogue_with_memory(
+            memory_str, self.config.get("voiceprint", {}), speaker_for_system
+        )
+        use_functions = (
+            self.intent_type == "function_call" and functions is not None
+        )
+
+        candidates = [("primary", self.llm)]
+        if self.llm_fallback is not None:
+            candidates.append(("fallback", self.llm_fallback))
+
+        settings = get_resilience_settings(self.config)
+        last_error = None
+
+        for label, llm_obj in candidates:
+            if llm_obj is None:
+                continue
+            provider = metrics_mod.provider_name_from_obj(llm_obj)
+            # 配置名优先用于 providers 策略表（selected_module / llm_fallback）
+            policy_name = (
+                self.llm_fallback_name
+                if label == "fallback"
+                else (self.config.get("selected_module") or {}).get("LLM") or provider
+            )
+            policy = get_provider_policy(self.config, "llm", policy_name)
+            breaker = (
+                get_circuit(f"llm:{provider}", settings) if settings.enabled else None
+            )
+            if breaker and not breaker.allow():
+                self.logger.bind(tag=TAG).warning(
+                    f"LLM {label}({provider}) 熔断开路，跳过"
+                )
+                continue
+
+            started = False
+            try:
+                if budget is not None:
+                    budget.ensure_round()
+
+                try:
+                    from core.utils.resilience import maybe_chaos_fail
+
+                    maybe_chaos_fail("llm", self.config)
+                except Exception as chaos_err:
+                    last_error = chaos_err
+                    if breaker:
+                        breaker.record_failure()
+                    self.logger.bind(tag=TAG).warning(f"LLM 混沌注入: {chaos_err}")
+                    continue
+
+                if use_functions:
+                    if hasattr(llm_obj, "response_with_functions_safe"):
+                        gen = llm_obj.response_with_functions_safe(
+                            self.session_id, dialogue, functions=functions
+                        )
+                    elif hasattr(llm_obj, "response_with_functions"):
+                        gen = llm_obj.response_with_functions(
+                            self.session_id, dialogue, functions=functions
+                        )
+                    else:
+                        # 备用模型无 function calling：退化为纯文本流，包装成 (content, None)
+                        def _as_function_stream(inner):
+                            for chunk in inner:
+                                yield chunk, None
+
+                        raw = (
+                            llm_obj.response_safe(self.session_id, dialogue)
+                            if hasattr(llm_obj, "response_safe")
+                            else llm_obj.response(self.session_id, dialogue)
+                        )
+                        gen = _as_function_stream(raw)
+                else:
+                    gen = (
+                        llm_obj.response_safe(self.session_id, dialogue)
+                        if hasattr(llm_obj, "response_safe")
+                        else llm_obj.response(self.session_id, dialogue)
+                    )
+
+                iterator = iter(gen)
+                ttfb_timeout = None
+                if budget is not None:
+                    rem = budget.ttfb_remaining()
+                    if rem is not None:
+                        ttfb_timeout = max(0.1, rem)
+                # providers.llm.*.timeout_seconds 也可作为首包上限兜底
+                policy_timeout = policy.get("timeout_seconds")
+                if policy_timeout and float(policy_timeout) > 0:
+                    if ttfb_timeout is None:
+                        ttfb_timeout = float(policy_timeout)
+                    else:
+                        ttfb_timeout = min(ttfb_timeout, float(policy_timeout))
+
+                try:
+                    first = next_with_timeout(iterator, ttfb_timeout)
+                except StopIteration:
+                    if breaker:
+                        breaker.record_success()
+                    return
+                started = True
+                if budget is not None:
+                    budget.mark_first_token()
+                if label == "fallback":
+                    self.logger.bind(tag=TAG).info(
+                        f"LLM 已切换到 fallback: {self.llm_fallback_name}"
+                    )
+                yield first, provider
+                for item in iterator:
+                    if budget is not None:
+                        budget.ensure_round()
+                    yield item, provider
+                if breaker:
+                    breaker.record_success()
+                return
+            except Exception as e:
+                last_error = e
+                if breaker:
+                    breaker.record_failure()
+                self.logger.bind(tag=TAG).error(
+                    f"LLM {label}({provider}) 失败: {e}"
+                )
+                metrics_mod.observe_provider("llm", provider, 0.0, status="error")
+                if started:
+                    # 已有部分输出，交给上层流式错误处理
+                    raise
+                continue
+
+        if last_error is not None:
+            raise last_error
+        raise UpstreamError(
+            "llm",
+            UpstreamKind.CIRCUIT_OPEN,
+            "all llm candidates unavailable",
+            retryable=False,
+        )
 
     def _initialize_memory(self):
         if self.memory is None:
@@ -1082,6 +1276,7 @@ class ConnectionHandler:
     def chat(self, query, depth=0):
         # 保存当前任务的sentence_id到局部变量，避免被新任务覆盖
         current_sentence_id = None
+        round_budget = None
 
         if query is not None:
             self.logger.bind(tag=TAG).info(f"大模型收到用户消息: {query}")
@@ -1153,21 +1348,18 @@ class ConnectionHandler:
                 self.system_introduced_speakers.add(cs)
                 speaker_for_system = cs
 
+            round_budget = None
+            if depth == 0:
+                round_budget = RoundBudget.start(get_resilience_settings(self.config))
+
             if self.intent_type == "function_call" and functions is not None:
-                # 使用支持functions的streaming接口
-                llm_responses = self.llm.response_with_functions(
-                    self.session_id,
-                    self.dialogue.get_llm_dialogue_with_memory(
-                        memory_str, self.config.get("voiceprint", {}), speaker_for_system
-                    ),
-                    functions=functions,
+                # 使用支持functions的streaming接口（含 fallback）
+                llm_responses = self._iter_llm_with_fallback(
+                    memory_str, functions, speaker_for_system, round_budget
                 )
             else:
-                llm_responses = self.llm.response(
-                    self.session_id,
-                    self.dialogue.get_llm_dialogue_with_memory(
-                        memory_str, self.config.get("voiceprint", {}), speaker_for_system
-                    ),
+                llm_responses = self._iter_llm_with_fallback(
+                    memory_str, None, speaker_for_system, round_budget
                 )
         except Exception as e:
             metrics_mod.observe_provider(
@@ -1205,7 +1397,31 @@ class ConnectionHandler:
         llm_ttfb = None
         llm_status = "ok"
         try:
-            for response in llm_responses:
+            for response, active_provider in llm_responses:
+                if round_budget is not None:
+                    try:
+                        round_budget.ensure_round()
+                    except UpstreamError as deadline_err:
+                        self.logger.bind(tag=TAG).warning(
+                            f"单轮预算耗尽，结束流式输出: {deadline_err}"
+                        )
+                        llm_status = "error"
+                        enqueue_chat_degradation(
+                            self,
+                            current_sentence_id,
+                            "llm",
+                            UpstreamKind.TIMEOUT,
+                            ensure_last=(depth == 0),
+                        )
+                        metrics_mod.observe_provider(
+                            "llm",
+                            llm_provider,
+                            time.perf_counter() - llm_t0,
+                            status=llm_status,
+                            ttfb=llm_ttfb,
+                        )
+                        return
+                llm_provider = active_provider or llm_provider
                 if llm_ttfb is None:
                     llm_ttfb = time.perf_counter() - llm_t0
                 if self.client_abort:
@@ -1301,7 +1517,7 @@ class ConnectionHandler:
             status=llm_status,
             ttfb=llm_ttfb,
         )
-        # 成功时复位熔断
+        # 成功时复位熔断（_iter_llm_with_fallback 内已 record_success，此处兜底）
         if llm_status == "ok":
             settings = get_resilience_settings(self.config)
             if settings.enabled:

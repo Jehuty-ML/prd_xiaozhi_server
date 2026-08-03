@@ -78,6 +78,21 @@ async def startToChat(conn: "ConnectionHandler", text):
         await check_bind_device(conn)
         return
 
+    # 过载背压：连接/队列水位过高时直接降级，避免越拖越慢
+    from core.utils.resilience import (
+        UpstreamKind,
+        check_system_overload,
+        speak_degradation,
+    )
+    from core.utils import metrics as metrics_mod
+
+    overload_reason = check_system_overload(conn)
+    if overload_reason:
+        conn.logger.bind(tag=TAG).warning(f"过载降级，跳过本轮 chat: {overload_reason}")
+        metrics_mod.observe_overload_shed(overload_reason)
+        speak_degradation(conn, "overload", UpstreamKind.OVERLOAD)
+        return
+
     # 如果当日的输出字数大于限定的字数
     if conn.max_output_size > 0:
         if check_device_output_limit(
