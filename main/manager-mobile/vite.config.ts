@@ -156,12 +156,12 @@ export default async ({ command, mode }) => {
       hmr: true,
       port: Number.parseInt(VITE_APP_PORT, 10),
       // 仅 H5 端生效，其他端不生效（其他端走build，不走devServer)
+      // manager-api context-path 与 VITE_APP_PROXY_PREFIX 同为 /xiaozhi，保留前缀转发
       proxy: JSON.parse(VITE_APP_PROXY)
         ? {
             [VITE_APP_PROXY_PREFIX]: {
-              target: VITE_SERVER_BASEURL,
+              target: new URL(VITE_SERVER_BASEURL).origin,
               changeOrigin: true,
-              rewrite: path => path.replace(new RegExp(`^${VITE_APP_PROXY_PREFIX}`), ''),
             },
           }
         : undefined,
