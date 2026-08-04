@@ -222,6 +222,7 @@
 | `xiaozhi_provider_requests_total{component,provider,status}` | Counter | ASR/TTS/LLM 请求（ok/error/empty） |
 | `xiaozhi_provider_latency_seconds{component,provider}` | Histogram | 端到端耗时 |
 | `xiaozhi_provider_ttfb_seconds{component,provider}` | Histogram | LLM 首 token 时延 |
+| `xiaozhi_chat_first_audio_seconds` | Histogram | chat 起表 → 首段可播音频发出（LLM 首包 + 攒到首句标点 + TTS） |
 | `xiaozhi_queue_depth{queue}` | Gauge | `report` / `tts_text` / `tts_audio` 队列深度 |
 | `xiaozhi_circuit_state{name}` | Gauge | 熔断状态 0=closed / 1=half_open / 2=open |
 | `xiaozhi_degraded_total{stage,kind}` | Counter | 降级/预置音事件 |
