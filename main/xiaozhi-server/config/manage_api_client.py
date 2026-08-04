@@ -244,7 +244,11 @@ async def generate_and_save_chat_title(session_id: str) -> Optional[Dict]:
             f"/agent/chat-title/{session_id}/generate",
         )
     except Exception as e:
-        print(f"生成并保存聊天标题失败: {e}")
+        err = str(e)
+        if "没有对话记录" in err or "No chat history" in err:
+            print(f"跳过聊天标题生成: {err}")
+        else:
+            print(f"生成并保存聊天标题失败: {e}")
         return None
 
 

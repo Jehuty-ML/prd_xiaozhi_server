@@ -81,7 +81,8 @@ public class AgentController {
     private String requireSessionAgent(String sessionId) {
         String agentId = agentChatHistoryService.getAgentIdBySessionId(sessionId);
         if (StringUtils.isBlank(agentId)) {
-            throw new RenException(ErrorCode.AGENT_NOT_FOUND);
+            // 会话下无聊天记录时查不到 agentId，属于没有对话记录，而非智能体本身不存在
+            throw new RenException(ErrorCode.CHAT_HISTORY_NOT_FOUND);
         }
         agentService.getAgentById(agentId);
         return agentId;

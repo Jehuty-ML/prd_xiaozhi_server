@@ -314,7 +314,11 @@ class ConnectionHandler:
         """保存记忆并关闭连接"""
         try:
             # 守护线程1：独立生成标题（不依赖记忆模型）
-            if self.session_id:
+            # 无用户对话时跳过，避免无聊天记录时误报「智能体未找到」
+            has_user_dialogue = any(
+                getattr(m, "role", None) == "user" for m in (self.dialogue.dialogue or [])
+            )
+            if self.session_id and has_user_dialogue:
                 def generate_title_task():
                     try:
                         loop = asyncio.new_event_loop()

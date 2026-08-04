@@ -260,4 +260,7 @@ public interface ErrorCode {
     // 替换词相关错误码
     int CORRECT_WORD_FILE_NAME_EXISTS = 10203; // 文件名已存在
     int FILE_SIZE_OVER_LIMIT = 10204; // 文件大小超过限制
+
+    // 聊天记录相关错误码（补充）
+    int CHAT_HISTORY_NOT_FOUND = 10205; // 没有对话记录
 }
