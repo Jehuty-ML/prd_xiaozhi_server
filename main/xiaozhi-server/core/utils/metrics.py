@@ -21,6 +21,7 @@ ws_session_duration_seconds = None
 provider_requests_total = None
 provider_latency_seconds = None
 provider_ttfb_seconds = None
+chat_first_audio_seconds = None
 queue_depth = None
 ws_max_connections = None
 circuit_state = None
@@ -33,7 +34,8 @@ def init_metrics(config: Optional[dict] = None) -> bool:
     global _ENABLED, _INITIALIZED
     global ws_active, ws_rejected_total, ws_sessions_opened_total
     global ws_session_duration_seconds, provider_requests_total
-    global provider_latency_seconds, provider_ttfb_seconds, queue_depth
+    global provider_latency_seconds, provider_ttfb_seconds, chat_first_audio_seconds
+    global queue_depth
     global ws_max_connections, circuit_state, degraded_total, overload_shed_total
 
     if _INITIALIZED:
@@ -90,6 +92,13 @@ def init_metrics(config: Optional[dict] = None) -> bool:
         "Upstream provider time to first token/byte",
         ["component", "provider"],
         buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 3, 5, 8, 15, 30),
+    )
+    # chat 起表 → 首段可播音频发出（含 LLM 首包、攒到首句标点、TTS 合成）
+    chat_first_audio_seconds = Histogram(
+        "xiaozhi_chat_first_audio_seconds",
+        "Chat turn latency to first playable audio "
+        "(LLM TTFB + speakable segment + TTS)",
+        buckets=(0.25, 0.5, 1, 2, 3, 5, 8, 12, 15, 20, 30, 60),
     )
     queue_depth = Gauge(
         "xiaozhi_queue_depth",
@@ -212,6 +221,32 @@ def observe_overload_shed(reason: str) -> None:
     # 归一化，避免高基数
     r = (reason or "unknown").split("=")[0][:32]
     overload_shed_total.labels(reason=r).inc()
+
+
+def mark_chat_first_audio_start(conn, sentence_id: str) -> None:
+    """chat(depth=0) 起表：等到发出第一段可播音频时 observe。"""
+    conn._chat_first_audio_t0 = time.perf_counter()
+    conn._chat_first_audio_sentence_id = sentence_id
+    conn._chat_first_audio_observed = False
+
+
+def try_observe_chat_first_audio(conn, sentence_id: Optional[str] = None) -> None:
+    """首段可播音频发出时打点（每轮最多一次）。"""
+    if not _ENABLED or chat_first_audio_seconds is None:
+        return
+    if getattr(conn, "_chat_first_audio_observed", True):
+        return
+    t0 = getattr(conn, "_chat_first_audio_t0", None)
+    if t0 is None:
+        return
+    expected = getattr(conn, "_chat_first_audio_sentence_id", None)
+    sid = sentence_id if sentence_id is not None else getattr(conn, "sentence_id", None)
+    if expected and sid and expected != sid:
+        return
+    elapsed = time.perf_counter() - t0
+    if elapsed >= 0:
+        chat_first_audio_seconds.observe(elapsed)
+    conn._chat_first_audio_observed = True
 
 
 @contextmanager

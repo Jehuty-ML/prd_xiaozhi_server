@@ -197,6 +197,10 @@ class ConnectionHandler:
         self.sentence_id = None
         # 处理TTS响应没有文本返回
         self.tts_MessageText = ""
+        # chat 首包可播音频时延：depth=0 起表，发送第一段语音时打点
+        self._chat_first_audio_t0 = None
+        self._chat_first_audio_sentence_id = None
+        self._chat_first_audio_observed = True
 
         # iot相关变量
         self.iot_descriptors = {}
@@ -1285,6 +1289,7 @@ class ConnectionHandler:
         if depth == 0:
             current_sentence_id = str(uuid.uuid4().hex)
             self.sentence_id = current_sentence_id  # 更新共享属性
+            metrics_mod.mark_chat_first_audio_start(self, current_sentence_id)
             self.dialogue.put(Message(role="user", content=query))
             self.tts.tts_text_queue.put(
                 TTSMessageDTO(

@@ -129,6 +129,7 @@ def verify_metrics():
         "xiaozhi_degraded_total",
         "xiaozhi_overload_shed_total",
         "xiaozhi_provider_requests_total",
+        "xiaozhi_chat_first_audio_seconds",
         "xiaozhi_queue_depth",
     ):
         hit = name in text
