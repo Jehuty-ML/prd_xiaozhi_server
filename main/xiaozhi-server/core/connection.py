@@ -49,14 +49,17 @@ from core.utils.resilience import (
     UpstreamError,
     UpstreamKind,
     RoundBudget,
-    check_system_overload,
     classify_exception,
     enqueue_chat_degradation,
     get_circuit,
     get_fallback_text,
+    get_inflight_count,
     get_provider_policy,
     get_resilience_settings,
     next_with_timeout,
+    release_inflight,
+    speak_degradation,
+    try_acquire_inflight,
 )
 
 
@@ -185,7 +188,15 @@ class ConnectionHandler:
         # 因为实际部署时可能会用到公共的本地ASR，不能把变量暴露给公共ASR
         # 所以涉及到ASR的变量，需要在这里定义，属于connection的私有变量
         self.asr_audio = []  # 存储PCM帧列表，供VAD和ASR共享
-        self.asr_audio_queue = queue.Queue()
+        try:
+            asr_q_max = get_resilience_settings(
+                self.config
+            ).overload_asr_audio_queue_maxsize
+        except Exception:
+            asr_q_max = 200
+        from core.utils.bounded_queue import DroppingQueue
+
+        self.asr_audio_queue = DroppingQueue(maxsize=asr_q_max, name="asr_audio")
         self.current_speaker = None  # 存储当前说话人
         self.introduced_speakers = set()  # 已"首次引入"的说话人，控制只在首轮带名字
         self.system_introduced_speakers = set()  # 已在 system 注入过身份的说话人，控制 system 身份只首轮出现
@@ -1048,7 +1059,34 @@ class ConnectionHandler:
         """主 LLM 失败且尚未产出内容时，切换到 fallback 再试。
 
         已开始流式输出后不再切换，避免半截答案拼到另一模型。
+        整段生成器占用一个全局 in_flight_llm 槽位（含首包等待与流式输出）。
         """
+        settings = get_resilience_settings(self.config)
+        llm_limit = settings.overload_max_concurrent_llm
+        acquired_llm = False
+        if settings.enabled and settings.overload_enabled and llm_limit > 0:
+            if not try_acquire_inflight("llm", llm_limit):
+                n = get_inflight_count("llm")
+                raise UpstreamError(
+                    "llm",
+                    UpstreamKind.OVERLOAD,
+                    f"in_flight_llm={n}/{llm_limit}",
+                    retryable=False,
+                )
+            acquired_llm = True
+
+        try:
+            yield from self._iter_llm_with_fallback_inner(
+                memory_str, functions, speaker_for_system, budget
+            )
+        finally:
+            if acquired_llm:
+                release_inflight("llm")
+
+    def _iter_llm_with_fallback_inner(
+        self, memory_str, functions, speaker_for_system, budget: RoundBudget = None
+    ):
+        """主 LLM 失败且尚未产出内容时，切换到 fallback 再试。"""
         self._ensure_llm_fallback()
         dialogue = self.dialogue.get_llm_dialogue_with_memory(
             memory_str, self.config.get("voiceprint", {}), speaker_for_system
@@ -1282,6 +1320,35 @@ class ConnectionHandler:
         self.dialogue.update_system_message(self.prompt)
 
     def chat(self, query, depth=0):
+        """对外入口：depth=0 时占用全局 in_flight_chats 槽位。"""
+        acquired_chat = False
+        if depth == 0:
+            settings = get_resilience_settings(self.config)
+            limit = settings.overload_max_concurrent_chats
+            if settings.enabled and settings.overload_enabled and limit > 0:
+                if not try_acquire_inflight("chat", limit):
+                    n = get_inflight_count("chat")
+                    reason = f"in_flight_chats={n}/{limit}"
+                    self.logger.bind(tag=TAG).warning(f"过载降级，跳过本轮 chat: {reason}")
+                    try:
+                        metrics_mod.observe_overload_shed(reason)
+                    except Exception:
+                        pass
+                    speak_degradation(
+                        self,
+                        "overload",
+                        UpstreamKind.OVERLOAD,
+                        overload_reason=reason,
+                    )
+                    return None
+                acquired_chat = True
+        try:
+            return self._chat_body(query, depth)
+        finally:
+            if acquired_chat:
+                release_inflight("chat")
+
+    def _chat_body(self, query, depth=0):
         # 保存当前任务的sentence_id到局部变量，避免被新任务覆盖
         current_sentence_id = None
         round_budget = None

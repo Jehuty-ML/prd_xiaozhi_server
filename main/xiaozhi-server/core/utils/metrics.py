@@ -27,6 +27,9 @@ ws_max_connections = None
 circuit_state = None
 degraded_total = None
 overload_shed_total = None
+inflight_gauge = None
+inflight_max_gauge = None
+queue_dropped_total = None
 
 
 def init_metrics(config: Optional[dict] = None) -> bool:
@@ -37,6 +40,8 @@ def init_metrics(config: Optional[dict] = None) -> bool:
     global provider_latency_seconds, provider_ttfb_seconds, chat_first_audio_seconds
     global queue_depth
     global ws_max_connections, circuit_state, degraded_total, overload_shed_total
+    global inflight_gauge, inflight_max_gauge
+    global queue_dropped_total
 
     if _INITIALIZED:
         return _ENABLED
@@ -120,11 +125,38 @@ def init_metrics(config: Optional[dict] = None) -> bool:
         "Turns shed due to overload backpressure",
         ["reason"],
     )
+    queue_dropped_total = Counter(
+        "xiaozhi_queue_dropped_total",
+        "Items dropped because a bounded queue was full",
+        ["queue"],
+    )
+    inflight_gauge = Gauge(
+        "xiaozhi_inflight",
+        "Global in-flight units (chat turns / llm streams)",
+        ["kind"],
+    )
+    inflight_max_gauge = Gauge(
+        "xiaozhi_inflight_max",
+        "Configured max for global in-flight units",
+        ["kind"],
+    )
 
     # 同步配置上限
     conn_cfg = server.get("connection") or {}
     try:
         ws_max_connections.set(float(conn_cfg.get("max_connections", 500)))
+    except Exception:
+        pass
+    try:
+        res = (server.get("resilience") or {}).get("overload") or {}
+        inflight_max_gauge.labels(kind="chat").set(
+            float(res.get("max_concurrent_chats", 80))
+        )
+        inflight_max_gauge.labels(kind="llm").set(
+            float(res.get("max_concurrent_llm", 80))
+        )
+        inflight_gauge.labels(kind="chat").set(0)
+        inflight_gauge.labels(kind="llm").set(0)
     except Exception:
         pass
 
@@ -195,6 +227,12 @@ def set_queue_depth(queue_name: str, depth: int) -> None:
         queue_depth.labels(queue=queue_name).set(max(0, int(depth)))
 
 
+def observe_queue_dropped(queue_name: str) -> None:
+    if not _ENABLED or queue_dropped_total is None:
+        return
+    queue_dropped_total.labels(queue=(queue_name or "unknown")[:32]).inc()
+
+
 _CIRCUIT_STATE_VALUES = {"closed": 0, "half_open": 1, "open": 2}
 
 
@@ -221,6 +259,16 @@ def observe_overload_shed(reason: str) -> None:
     # 归一化，避免高基数
     r = (reason or "unknown").split("=")[0][:32]
     overload_shed_total.labels(reason=r).inc()
+
+
+def set_inflight(kind: str, value: int) -> None:
+    if _ENABLED and inflight_gauge is not None:
+        inflight_gauge.labels(kind=str(kind or "unknown")).set(float(value))
+
+
+def set_inflight_max(kind: str, value: int) -> None:
+    if _ENABLED and inflight_max_gauge is not None:
+        inflight_max_gauge.labels(kind=str(kind or "unknown")).set(float(value))
 
 
 def mark_chat_first_audio_start(conn, sentence_id: str) -> None:

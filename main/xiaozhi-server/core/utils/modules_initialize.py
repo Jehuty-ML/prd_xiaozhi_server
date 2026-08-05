@@ -105,9 +105,20 @@ def initialize_tts(config):
         if "type" not in config["TTS"][select_tts_module]
         else config["TTS"][select_tts_module]["type"]
     )
+    tts_cfg = dict(config["TTS"][select_tts_module])
+    try:
+        from core.utils.resilience import get_resilience_settings
+
+        settings = get_resilience_settings(config)
+        tts_cfg.setdefault("text_queue_maxsize", settings.overload_tts_text_queue_maxsize)
+        tts_cfg.setdefault(
+            "audio_queue_maxsize", settings.overload_tts_audio_queue_maxsize
+        )
+    except Exception:
+        pass
     new_tts = tts.create_instance(
         tts_type,
-        config["TTS"][select_tts_module],
+        tts_cfg,
         str(config.get("delete_audio", True)).lower() in ("true", "1", "yes"),
     )
     return new_tts

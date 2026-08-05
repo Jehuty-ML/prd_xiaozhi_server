@@ -82,12 +82,22 @@ server:
     llm_ttfb_deadline_seconds: 25
     round_deadline_seconds: 120
     # 过载背压：水位过高时新对话直接降级
+    # connection_usage（挂机 WS 占比）已废弃：误伤挂机多、开口少的场景
     overload:
       enabled: true
-      connection_usage_threshold: 0.85
+      # 全局同时进行中的对话轮次（listen→LLM→TTS）；1 核实测约 80 路打满
+      max_concurrent_chats: 80
+      # 全局同时占用上游 LLM 的流式调用数（含工具递归中的再次请求）
+      max_concurrent_llm: 80
       tts_text_queue_threshold: 80
       tts_audio_queue_threshold: 120
+      # 有界容量（满则丢最旧）；建议 ≥ 对应 threshold
+      tts_text_queue_maxsize: 80
+      tts_audio_queue_maxsize: 120
+      asr_audio_queue_maxsize: 200
       report_queue_usage_threshold: 0.9
+      # 过载话术（勿在 resilience 顶层再用同名 overload 标量，会冲掉本段）
+      message: "现在有点忙不过来，请稍后再试一下。"
     # 按 stage/provider 覆盖（键名同 selected_module / LLM 段）
     providers:
       asr: {}
@@ -129,7 +139,6 @@ server:
     llm: "主人，小智现在有点忙，我们稍后再试吧。"
     tts: "抱歉，我暂时说不出话，请稍后再试。"
     tool: "哎呀，网络遇到点问题，请稍后再试下！"
-    overload: "现在有点忙不过来，请稍后再试一下。"
 log:
   # 设置控制台输出的日志格式，时间、日志级别、标签、消息
   log_format: "<green>{time:YYMMDD HH:mm:ss}</green>[{version}_{selected_module}][<light-blue>{extra[tag]}</light-blue>]-<level>{level}</level>-<light-green>{message}</light-green>"

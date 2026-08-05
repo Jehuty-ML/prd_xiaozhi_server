@@ -24,6 +24,7 @@ from core.utils.resilience import (
     get_circuit,
     get_resilience_settings,
 )
+from core.utils.bounded_queue import DroppingQueue
 from core.providers.tts.dto.dto import (
     TTSMessageDTO,
     SentenceType,
@@ -43,8 +44,10 @@ class TTSProviderBase(ABC):
         self.audio_file_type = "wav"
         self.output_file = config.get("output_dir", "tmp/")
         self.tts_timeout = int(config.get("tts_timeout", 15))
-        self.tts_text_queue = queue.Queue()
-        self.tts_audio_queue = queue.Queue()
+        text_max = max(1, int(config.get("text_queue_maxsize", 80) or 80))
+        audio_max = max(1, int(config.get("audio_queue_maxsize", 120) or 120))
+        self.tts_text_queue = DroppingQueue(maxsize=text_max, name="tts_text")
+        self.tts_audio_queue = DroppingQueue(maxsize=audio_max, name="tts_audio")
         self.tts_audio_first_sentence = True
         self.before_stop_play_files = []
         self.report_on_last = False
