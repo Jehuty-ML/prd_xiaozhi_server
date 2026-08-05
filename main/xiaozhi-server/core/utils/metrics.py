@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from contextlib import contextmanager
 from typing import Optional
@@ -30,6 +31,10 @@ overload_shed_total = None
 inflight_gauge = None
 inflight_max_gauge = None
 queue_dropped_total = None
+
+# 进程级队列深度：按连接汇总，避免多连接 set 互相覆盖
+_QUEUE_DEPTH_LOCK = threading.Lock()
+_QUEUE_DEPTH_BY_CONN = {}  # (conn_id, queue_name) -> depth
 
 
 def init_metrics(config: Optional[dict] = None) -> bool:
@@ -144,7 +149,7 @@ def init_metrics(config: Optional[dict] = None) -> bool:
     # 同步配置上限
     conn_cfg = server.get("connection") or {}
     try:
-        ws_max_connections.set(float(conn_cfg.get("max_connections", 500)))
+        ws_max_connections.set(float(conn_cfg.get("max_connections", 200)))
     except Exception:
         pass
     try:
@@ -222,9 +227,50 @@ def observe_provider(
         ).observe(ttfb)
 
 
-def set_queue_depth(queue_name: str, depth: int) -> None:
+def set_queue_depth(
+    queue_name: str,
+    depth: int,
+    *,
+    conn_id: Optional[str] = None,
+) -> None:
+    """更新队列深度。
+
+    传入 conn_id 时按连接登记再汇总为进程级总和，避免多连接互相覆盖。
+    未传 conn_id 时直接写入（兼容旧调用，仍可能被覆盖）。
+    """
+    global _QUEUE_DEPTH_BY_CONN
+    name = (queue_name or "unknown")[:32]
+    value = max(0, int(depth))
+    if conn_id:
+        key = (str(conn_id), name)
+        with _QUEUE_DEPTH_LOCK:
+            _QUEUE_DEPTH_BY_CONN[key] = value
+            total = sum(v for (cid, q), v in _QUEUE_DEPTH_BY_CONN.items() if q == name)
+        if _ENABLED and queue_depth is not None:
+            queue_depth.labels(queue=name).set(total)
+        return
     if _ENABLED and queue_depth is not None:
-        queue_depth.labels(queue=queue_name).set(max(0, int(depth)))
+        queue_depth.labels(queue=name).set(value)
+
+
+def clear_conn_queue_depths(conn_id: Optional[str]) -> None:
+    """连接关闭时移除该连接贡献的队列深度。"""
+    if not conn_id:
+        return
+    cid = str(conn_id)
+    affected = set()
+    with _QUEUE_DEPTH_LOCK:
+        for key in list(_QUEUE_DEPTH_BY_CONN.keys()):
+            if key[0] == cid:
+                affected.add(key[1])
+                _QUEUE_DEPTH_BY_CONN.pop(key, None)
+        totals = {
+            q: sum(v for (c, name), v in _QUEUE_DEPTH_BY_CONN.items() if name == q)
+            for q in affected
+        }
+    if _ENABLED and queue_depth is not None:
+        for q, total in totals.items():
+            queue_depth.labels(queue=q).set(total)
 
 
 def observe_queue_dropped(queue_name: str) -> None:

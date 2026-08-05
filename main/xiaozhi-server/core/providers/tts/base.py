@@ -46,8 +46,16 @@ class TTSProviderBase(ABC):
         self.tts_timeout = int(config.get("tts_timeout", 15))
         text_max = max(1, int(config.get("text_queue_maxsize", 80) or 80))
         audio_max = max(1, int(config.get("audio_queue_maxsize", 120) or 120))
-        self.tts_text_queue = DroppingQueue(maxsize=text_max, name="tts_text")
-        self.tts_audio_queue = DroppingQueue(maxsize=audio_max, name="tts_audio")
+        self.tts_text_queue = DroppingQueue(
+            maxsize=text_max,
+            name="tts_text",
+            conn_id_getter=lambda: getattr(getattr(self, "conn", None), "session_id", None),
+        )
+        self.tts_audio_queue = DroppingQueue(
+            maxsize=audio_max,
+            name="tts_audio",
+            conn_id_getter=lambda: getattr(getattr(self, "conn", None), "session_id", None),
+        )
         self.tts_audio_first_sentence = True
         self.before_stop_play_files = []
         self.report_on_last = False
@@ -396,11 +404,12 @@ class TTSProviderBase(ABC):
             )
             try:
                 if self.conn and getattr(self.conn, "tts", None) is self:
+                    sid = getattr(self.conn, "session_id", None)
                     metrics_mod.set_queue_depth(
-                        "tts_text", self.tts_text_queue.qsize()
+                        "tts_text", self.tts_text_queue.qsize(), conn_id=sid
                     )
                     metrics_mod.set_queue_depth(
-                        "tts_audio", self.tts_audio_queue.qsize()
+                        "tts_audio", self.tts_audio_queue.qsize(), conn_id=sid
                     )
             except Exception:
                 pass
@@ -612,12 +621,21 @@ class TTSProviderBase(ABC):
                 if isinstance(audio_datas, bytes):
                     enqueue_audio.append(audio_datas)
 
-                # 发送音频
+                # 发送音频。禁止无限 future.result()：loop 卡住时会堵死消费者，
+                # 有界 tts_audio_queue 只能狂丢。超时后取消任务，让消费者继续排空。
                 future = asyncio.run_coroutine_threadsafe(
                     sendAudioMessage(self.conn, sentence_type, audio_datas, text, sentence_id),
                     self.conn.loop,
                 )
-                future.result()
+                # LAST 可能等待 AudioRateController 排空，给更长超时；仍须有上限
+                timeout = 120.0 if sentence_type is SentenceType.LAST else 30.0
+                try:
+                    future.result(timeout=timeout)
+                except concurrent.futures.TimeoutError:
+                    future.cancel()
+                    logger.bind(tag=TAG).warning(
+                        f"TTS 播发等待事件循环超时({timeout}s)，跳过本包以免堵死消费者"
+                    )
 
                 # 记录输出和报告
                 if self.conn.max_output_size > 0 and text:

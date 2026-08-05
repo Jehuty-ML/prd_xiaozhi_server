@@ -181,3 +181,15 @@ class AudioRateController:
         if self.pending_send_task and not self.pending_send_task.done():
             self.pending_send_task.cancel()
             self.logger.bind(tag=TAG).debug("已取消音频发送任务")
+
+    def pending_audio_count(self) -> int:
+        """待发音频帧数（不含 message 回调）。"""
+        return sum(1 for item in self.queue if item and item[0] == "audio")
+
+    def pending_count(self) -> int:
+        """流控 deque 总长度（音频 + 消息）。"""
+        return len(self.queue)
+
+    def pending_audio_ms(self) -> float:
+        """待发音频大约占用的播放时长（毫秒）。"""
+        return self.pending_audio_count() * float(self.frame_duration)

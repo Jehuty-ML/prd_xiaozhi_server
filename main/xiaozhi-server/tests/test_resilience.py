@@ -307,6 +307,60 @@ class TestSpeakDegradationOverload(unittest.TestCase):
         self.assertEqual(puts, [])
 
 
+class TestAudioRateOverload(unittest.TestCase):
+    def test_check_includes_audio_rate_controller(self):
+        from core.utils.resilience import check_system_overload, reset_inflight_for_tests
+        from core.utils.audioRateController import AudioRateController
+
+        reset_inflight_for_tests()
+        rc = AudioRateController(60)
+        for i in range(80):
+            rc.add_audio(b"x")
+
+        class _Dummy:
+            config = {
+                "server": {
+                    "resilience": {
+                        "overload": {
+                            "enabled": True,
+                            "max_concurrent_chats": 0,
+                            "max_concurrent_llm": 0,
+                            "tts_text_queue_threshold": 9999,
+                            "tts_audio_queue_threshold": 9999,
+                            "audio_rate_queue_threshold": 80,
+                            "report_queue_usage_threshold": 1.1,
+                        }
+                    }
+                }
+            }
+            tts = None
+            report_queue = None
+            audio_rate_controller = rc
+
+        reason = check_system_overload(_Dummy())
+        self.assertIsNotNone(reason)
+        self.assertIn("audio_rate_queue", reason)
+
+
+class TestQueueDepthAggregate(unittest.TestCase):
+    def test_multi_conn_sums(self):
+        from core.utils import metrics as m
+
+        m._QUEUE_DEPTH_BY_CONN.clear()
+        m._ENABLED = False  # gauge may be None; still exercise aggregator
+        m.set_queue_depth("tts_audio", 3, conn_id="a")
+        m.set_queue_depth("tts_audio", 5, conn_id="b")
+        total = sum(
+            v for (c, q), v in m._QUEUE_DEPTH_BY_CONN.items() if q == "tts_audio"
+        )
+        self.assertEqual(total, 8)
+        m.clear_conn_queue_depths("a")
+        total = sum(
+            v for (c, q), v in m._QUEUE_DEPTH_BY_CONN.items() if q == "tts_audio"
+        )
+        self.assertEqual(total, 5)
+
+
 class TestHelpers(unittest.TestCase):
     def test_classify_timeout(self):
         self.assertEqual(classify_exception(TimeoutError("x")), UpstreamKind.TIMEOUT)
