@@ -14,7 +14,7 @@ from core.utils import metrics as metrics_mod
 
 @dataclass(frozen=True)
 class ConnectionLimits:
-    max_connections: int = 500
+    max_connections: int = 200
     max_connections_per_device: int = 2
     report_queue_maxsize: int = 100
     cleanup_timeout_seconds: float = 10.0
@@ -23,7 +23,7 @@ class ConnectionLimits:
     def from_config(cls, server_config: dict) -> "ConnectionLimits":
         conn_cfg = server_config.get("connection") or {}
         return cls(
-            max_connections=int(conn_cfg.get("max_connections", 500)),
+            max_connections=int(conn_cfg.get("max_connections", 200)),
             max_connections_per_device=int(
                 conn_cfg.get("max_connections_per_device", 2)
             ),

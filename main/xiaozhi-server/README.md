@@ -67,7 +67,7 @@
 
 | param_code | 默认 | 说明 |
 |------------|------|------|
-| `server.connection.max_connections` | 500 | 单进程最大 WS 连接数 |
+| `server.connection.max_connections` | 200 | 单进程最大 WS 连接数 |
 | `server.connection.max_connections_per_device` | 2 | 同 device-id 上限 |
 | `server.connection.report_queue_maxsize` | 100 | 上报队列上限 |
 | `server.connection.cleanup_timeout_seconds` | 10 | 清理超时（秒） |
