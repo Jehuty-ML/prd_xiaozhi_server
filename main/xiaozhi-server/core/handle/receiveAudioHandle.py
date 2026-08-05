@@ -90,7 +90,12 @@ async def startToChat(conn: "ConnectionHandler", text):
     if overload_reason:
         conn.logger.bind(tag=TAG).warning(f"过载降级，跳过本轮 chat: {overload_reason}")
         metrics_mod.observe_overload_shed(overload_reason)
-        speak_degradation(conn, "overload", UpstreamKind.OVERLOAD)
+        speak_degradation(
+            conn,
+            "overload",
+            UpstreamKind.OVERLOAD,
+            overload_reason=overload_reason,
+        )
         return
 
     # 如果当日的输出字数大于限定的字数

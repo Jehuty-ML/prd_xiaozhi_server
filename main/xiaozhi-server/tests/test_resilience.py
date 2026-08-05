@@ -149,6 +149,164 @@ class TestChaos(unittest.TestCase):
         self.assertIn("chaos", str(ctx.exception).lower())
 
 
+class TestInFlightLimiter(unittest.TestCase):
+    def setUp(self):
+        from core.utils.resilience import reset_inflight_for_tests
+
+        reset_inflight_for_tests()
+
+    def tearDown(self):
+        from core.utils.resilience import reset_inflight_for_tests
+
+        reset_inflight_for_tests()
+
+    def test_acquire_release_and_limit(self):
+        from core.utils.resilience import (
+            get_inflight_count,
+            release_inflight,
+            try_acquire_inflight,
+        )
+
+        self.assertTrue(try_acquire_inflight("chat", 2))
+        self.assertTrue(try_acquire_inflight("chat", 2))
+        self.assertFalse(try_acquire_inflight("chat", 2))
+        self.assertEqual(get_inflight_count("chat"), 2)
+        release_inflight("chat")
+        self.assertTrue(try_acquire_inflight("chat", 2))
+        self.assertEqual(get_inflight_count("chat"), 2)
+
+    def test_limit_zero_unlimited(self):
+        from core.utils.resilience import try_acquire_inflight
+
+        for _ in range(5):
+            self.assertTrue(try_acquire_inflight("llm", 0))
+
+    def test_check_system_overload_inflight(self):
+        from core.utils.resilience import (
+            check_system_overload,
+            release_inflight,
+            try_acquire_inflight,
+        )
+
+        class _Dummy:
+            config = {
+                "server": {
+                    "resilience": {
+                        "overload": {
+                            "enabled": True,
+                            "max_concurrent_chats": 1,
+                            "max_concurrent_llm": 99,
+                            "tts_text_queue_threshold": 9999,
+                            "tts_audio_queue_threshold": 9999,
+                            "report_queue_usage_threshold": 1.1,
+                        }
+                    }
+                }
+            }
+            tts = None
+            report_queue = None
+            server = None
+
+        self.assertIsNone(check_system_overload(_Dummy()))
+        self.assertTrue(try_acquire_inflight("chat", 1))
+        reason = check_system_overload(_Dummy())
+        self.assertIsNotNone(reason)
+        self.assertIn("in_flight_chats", reason)
+        release_inflight("chat")
+        self.assertIsNone(check_system_overload(_Dummy()))
+
+    def test_settings_no_connection_usage(self):
+        s = get_resilience_settings({})
+        self.assertEqual(s.overload_max_concurrent_chats, 80)
+        self.assertEqual(s.overload_max_concurrent_llm, 80)
+        self.assertFalse(hasattr(s, "overload_connection_usage_threshold"))
+        self.assertEqual(s.overload_tts_text_queue_maxsize, 80)
+        self.assertEqual(s.overload_tts_audio_queue_maxsize, 120)
+        self.assertEqual(s.overload_asr_audio_queue_maxsize, 200)
+
+    def test_overload_message_phrase(self):
+        s = get_resilience_settings(
+            {
+                "server": {
+                    "resilience": {
+                        "overload": {
+                            "enabled": True,
+                            "max_concurrent_chats": 10,
+                            "message": "忙不过来啦",
+                        },
+                    }
+                }
+            }
+        )
+        self.assertEqual(s.overload_max_concurrent_chats, 10)
+        self.assertEqual(s.phrases.get("overload"), "忙不过来啦")
+
+    def test_maxsize_clamped_to_threshold(self):
+        s = get_resilience_settings(
+            {
+                "server": {
+                    "resilience": {
+                        "overload": {
+                            "tts_text_queue_threshold": 100,
+                            "tts_text_queue_maxsize": 40,
+                        }
+                    }
+                }
+            }
+        )
+        self.assertEqual(s.overload_tts_text_queue_threshold, 100)
+        self.assertEqual(s.overload_tts_text_queue_maxsize, 100)
+
+
+class TestDroppingQueue(unittest.TestCase):
+    def test_drops_oldest_when_full(self):
+        from core.utils.bounded_queue import DroppingQueue
+
+        q = DroppingQueue(maxsize=2, name="test")
+        q.put("a")
+        q.put("b")
+        q.put("c")
+        self.assertEqual(q.qsize(), 2)
+        self.assertEqual(q.get_nowait(), "b")
+        self.assertEqual(q.get_nowait(), "c")
+        self.assertGreaterEqual(q.dropped, 1)
+
+
+class TestSpeakDegradationOverload(unittest.TestCase):
+    def test_tts_queue_overload_skips_enqueue(self):
+        from core.utils.resilience import speak_degradation, UpstreamKind
+        from core.utils.bounded_queue import DroppingQueue
+
+        puts = []
+
+        class _Q(DroppingQueue):
+            def put(self, item, block=True, timeout=None):
+                puts.append(item)
+                return super().put(item, block=block, timeout=timeout)
+
+        class _TTS:
+            tts_text_queue = _Q(maxsize=8, name="tts_text")
+
+            def store_tts_text(self, *a, **k):
+                pass
+
+        class _Conn:
+            config = {"server": {"resilience": {"enabled": True}}}
+            stop_event = None
+            client_abort = False
+            tts = _TTS()
+            sentence_id = "sid"
+            dialogue = None
+
+        speak_degradation(
+            _Conn(),
+            "overload",
+            UpstreamKind.OVERLOAD,
+            overload_reason="tts_text_queue=80",
+        )
+        self.assertEqual(puts, [])
+
+
 class TestHelpers(unittest.TestCase):
     def test_classify_timeout(self):
         self.assertEqual(classify_exception(TimeoutError("x")), UpstreamKind.TIMEOUT)

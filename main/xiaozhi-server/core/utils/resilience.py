@@ -176,9 +176,14 @@ class ResilienceSettings:
     round_deadline_seconds: float = 120.0
     # 过载背压
     overload_enabled: bool = True
-    overload_connection_usage_threshold: float = 0.85
+    overload_max_concurrent_chats: int = 80
+    overload_max_concurrent_llm: int = 80
     overload_tts_text_queue_threshold: int = 80
     overload_tts_audio_queue_threshold: int = 120
+    # 有界队列容量（满则丢最旧）；默认与阈值一致，避免阈值永远达不到
+    overload_tts_text_queue_maxsize: int = 80
+    overload_tts_audio_queue_maxsize: int = 120
+    overload_asr_audio_queue_maxsize: int = 200
     overload_report_queue_usage_threshold: float = 0.9
     # 混沌注入（仅联调；production 应保持 enabled=false）
     chaos_enabled: bool = False
@@ -223,22 +228,32 @@ def get_resilience_settings(config: Optional[dict] = None) -> ResilienceSettings
         "tts",
         "tool",
         "manage_api",
-        "overload",
         "asr_failed",
         "llm_failed",
         "tts_failed",
         "tool_failed",
     ):
-        if raw.get(key):
+        val = raw.get(key)
+        # 话术必须是标量；同名若是 dict（如误配）则跳过
+        if val is not None and not isinstance(val, dict):
             canon = key.replace("_failed", "") if key.endswith("_failed") else key
-            phrases[canon] = str(raw[key])
+            phrases[canon] = str(val)
 
     overload = raw.get("overload") if isinstance(raw.get("overload"), dict) else {}
+    # 过载话术：overload.message（与 overload.* 配置同树，不冲突）
+    # 兼容旧键 overload_message / 顶层标量 overload
+    om = overload.get("message")
+    if om is None:
+        om = raw.get("overload_message")
+    if om is not None and not isinstance(om, dict):
+        phrases["overload"] = str(om)
+    elif isinstance(raw.get("overload"), str) and raw.get("overload"):
+        phrases["overload"] = str(raw["overload"])
     chaos = raw.get("chaos") if isinstance(raw.get("chaos"), dict) else {}
     redis_cfg = raw.get("redis") if isinstance(raw.get("redis"), dict) else {}
     providers = raw.get("providers") if isinstance(raw.get("providers"), dict) else {}
 
-    return ResilienceSettings(
+    settings = ResilienceSettings(
         enabled=bool(raw.get("enabled", True)),
         asr_timeout_seconds=float(raw.get("asr_timeout_seconds", 15)),
         llm_timeout_seconds=float(raw.get("llm_timeout_seconds", 90)),
@@ -256,11 +271,23 @@ def get_resilience_settings(config: Optional[dict] = None) -> ResilienceSettings
         llm_ttfb_deadline_seconds=float(raw.get("llm_ttfb_deadline_seconds", 25)),
         round_deadline_seconds=float(raw.get("round_deadline_seconds", 120)),
         overload_enabled=bool(overload.get("enabled", raw.get("overload_enabled", True))),
-        overload_connection_usage_threshold=float(
-            overload.get(
-                "connection_usage_threshold",
-                raw.get("overload_connection_usage_threshold", 0.85),
-            )
+        overload_max_concurrent_chats=max(
+            0,
+            int(
+                overload.get(
+                    "max_concurrent_chats",
+                    raw.get("overload_max_concurrent_chats", 80),
+                )
+            ),
+        ),
+        overload_max_concurrent_llm=max(
+            0,
+            int(
+                overload.get(
+                    "max_concurrent_llm",
+                    raw.get("overload_max_concurrent_llm", 80),
+                )
+            ),
         ),
         overload_tts_text_queue_threshold=int(
             overload.get(
@@ -273,6 +300,45 @@ def get_resilience_settings(config: Optional[dict] = None) -> ResilienceSettings
                 "tts_audio_queue_threshold",
                 raw.get("overload_tts_audio_queue_threshold", 120),
             )
+        ),
+        overload_tts_text_queue_maxsize=max(
+            1,
+            int(
+                overload.get(
+                    "tts_text_queue_maxsize",
+                    raw.get(
+                        "overload_tts_text_queue_maxsize",
+                        overload.get(
+                            "tts_text_queue_threshold",
+                            raw.get("overload_tts_text_queue_threshold", 80),
+                        ),
+                    ),
+                )
+            ),
+        ),
+        overload_tts_audio_queue_maxsize=max(
+            1,
+            int(
+                overload.get(
+                    "tts_audio_queue_maxsize",
+                    raw.get(
+                        "overload_tts_audio_queue_maxsize",
+                        overload.get(
+                            "tts_audio_queue_threshold",
+                            raw.get("overload_tts_audio_queue_threshold", 120),
+                        ),
+                    ),
+                )
+            ),
+        ),
+        overload_asr_audio_queue_maxsize=max(
+            1,
+            int(
+                overload.get(
+                    "asr_audio_queue_maxsize",
+                    raw.get("overload_asr_audio_queue_maxsize", 200),
+                )
+            ),
         ),
         overload_report_queue_usage_threshold=float(
             overload.get(
@@ -324,6 +390,22 @@ def get_resilience_settings(config: Optional[dict] = None) -> ResilienceSettings
         providers=providers,
         phrases=phrases,
     )
+    # 容量至少能涨到过载阈值，否则水位检测永远达不到
+    if (
+        settings.overload_tts_text_queue_maxsize
+        < settings.overload_tts_text_queue_threshold
+    ):
+        settings.overload_tts_text_queue_maxsize = (
+            settings.overload_tts_text_queue_threshold
+        )
+    if (
+        settings.overload_tts_audio_queue_maxsize
+        < settings.overload_tts_audio_queue_threshold
+    ):
+        settings.overload_tts_audio_queue_maxsize = (
+            settings.overload_tts_audio_queue_threshold
+        )
+    return settings
 
 
 def get_provider_policy(
@@ -443,22 +525,92 @@ def next_with_timeout(iterator, timeout_seconds: Optional[float]):
     return box["value"]
 
 
+class InFlightLimiter:
+    """进程内全局在途计数（chat / llm）。limit<=0 表示不限制。"""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._counts: Dict[str, int] = {}
+
+    def count(self, name: str) -> int:
+        with self._lock:
+            return int(self._counts.get(name, 0))
+
+    def try_acquire(self, name: str, limit: int) -> bool:
+        if limit <= 0:
+            return True
+        with self._lock:
+            cur = int(self._counts.get(name, 0))
+            if cur >= limit:
+                return False
+            self._counts[name] = cur + 1
+            new_val = self._counts[name]
+        self._sync_metric(name, new_val)
+        return True
+
+    def release(self, name: str) -> None:
+        with self._lock:
+            cur = int(self._counts.get(name, 0))
+            if cur <= 0:
+                self._counts[name] = 0
+                new_val = 0
+            else:
+                new_val = cur - 1
+                self._counts[name] = new_val
+        self._sync_metric(name, new_val)
+
+    def reset_for_tests(self) -> None:
+        with self._lock:
+            self._counts.clear()
+        for name in ("chat", "llm"):
+            self._sync_metric(name, 0)
+
+    @staticmethod
+    def _sync_metric(name: str, value: int) -> None:
+        try:
+            from core.utils import metrics as metrics_mod
+
+            metrics_mod.set_inflight(name, value)
+        except Exception:
+            pass
+
+
+_INFLIGHT = InFlightLimiter()
+
+
+def get_inflight_count(name: str) -> int:
+    return _INFLIGHT.count(name)
+
+
+def try_acquire_inflight(name: str, limit: int) -> bool:
+    return _INFLIGHT.try_acquire(name, limit)
+
+
+def release_inflight(name: str) -> None:
+    _INFLIGHT.release(name)
+
+
+def reset_inflight_for_tests() -> None:
+    _INFLIGHT.reset_for_tests()
+
+
 def check_system_overload(conn: Any) -> Optional[str]:
-    """过载检测：连接水位 / TTS 队列 / 上报队列。返回原因字符串或 None。"""
+    """过载检测：全局在途对话/LLM + 本连接 TTS/上报队列。返回原因或 None。"""
     settings = get_resilience_settings(getattr(conn, "config", None))
     if not settings.enabled or not settings.overload_enabled:
         return None
 
-    server = getattr(conn, "server", None)
-    registry = getattr(server, "connection_registry", None) if server else None
-    if registry is not None:
-        try:
-            active = float(registry.active_count)
-            max_c = float(getattr(registry.limits, "max_connections", 0) or 0)
-            if max_c > 0 and active / max_c >= settings.overload_connection_usage_threshold:
-                return f"connection_usage={active:.0f}/{max_c:.0f}"
-        except Exception:
-            pass
+    chat_limit = settings.overload_max_concurrent_chats
+    if chat_limit > 0:
+        n = get_inflight_count("chat")
+        if n >= chat_limit:
+            return f"in_flight_chats={n}/{chat_limit}"
+
+    llm_limit = settings.overload_max_concurrent_llm
+    if llm_limit > 0:
+        n = get_inflight_count("llm")
+        if n >= llm_limit:
+            return f"in_flight_llm={n}/{llm_limit}"
 
     tts = getattr(conn, "tts", None)
     if tts is not None:
@@ -833,6 +985,13 @@ async def async_call_with_resilience(
 
 
 
+def is_tts_queue_overload_reason(reason: Optional[str]) -> bool:
+    """TTS 文本/音频队列过载：再往队列塞降级消息只会雪崩。"""
+    if not reason:
+        return False
+    return reason.startswith("tts_text_queue") or reason.startswith("tts_audio_queue")
+
+
 def enqueue_file_degradation(
     conn: Any,
     sentence_id: str,
@@ -884,8 +1043,14 @@ def speak_degradation(
     conn: Any,
     stage: str,
     kind: UpstreamKind = UpstreamKind.UNAVAILABLE,
+    *,
+    overload_reason: Optional[str] = None,
 ) -> None:
-    """独立一轮对设备播报降级话术（ASR 失败等，尚未进入 chat）。"""
+    """独立一轮对设备播报降级话术（ASR 失败等，尚未进入 chat）。
+
+    TTS 队列已过载时只记指标、不入队，避免继续堆队列。
+    in_flight 等过载优先走本地预置音（不调用 text_to_speak）。
+    """
     settings = get_resilience_settings(getattr(conn, "config", None))
     if not settings.enabled:
         return
@@ -896,13 +1061,31 @@ def speak_degradation(
     if not getattr(conn, "tts", None):
         return
 
+    # TTS 文本/音频队列已过载时：故意不入队、不播降级话。
+    # 原因：现有 FILE/TEXT 降级与预置音播放都仍走 tts_text_queue / tts_audio_queue，
+    # 再 put 只会顶掉或拉长积压，加重雪崩；此时静默 shed + 指标是当前管线下更稳的选择。
+    # 若要可感知降级，需另做「绕过 TTS 队列、直接 WS 下发短预置 opus」的短路径后再接这里。
+    if is_tts_queue_overload_reason(overload_reason):
+        try:
+            from core.utils import metrics as metrics_mod
+
+            metrics_mod.observe_degraded(stage, kind.value)
+        except Exception:
+            pass
+        _log().warning(
+            f"过载跳过降级播报（TTS 队列已满） reason={overload_reason}"
+        )
+        return
+
     text = get_fallback_text(getattr(conn, "config", None), stage, kind)
     try:
         if not getattr(conn, "sentence_id", None):
             conn.sentence_id = str(uuid.uuid4().hex)
         sentence_id = conn.sentence_id
         audio_path = resolve_tts_fallback_audio(getattr(conn, "config", None))
-        if should_use_tts_fallback_audio(conn) and audio_path:
+        # in_flight / 上报队列过载：强制预置音短路径（有文件时）
+        prefer_file = bool(overload_reason) or should_use_tts_fallback_audio(conn)
+        if prefer_file and audio_path:
             enqueue_file_degradation(
                 conn,
                 sentence_id,

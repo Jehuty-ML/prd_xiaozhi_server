@@ -298,7 +298,8 @@ server:
     use_tts_fallback_on_degrade: true
     overload:
       enabled: true
-      connection_usage_threshold: 0.85
+      max_concurrent_chats: 80      # 全局在途对话轮次
+      max_concurrent_llm: 80        # 全局在途 LLM 流
       tts_text_queue_threshold: 80
     providers:
       llm:
@@ -312,7 +313,7 @@ server:
 ### 验证要点
 
 1. 日志：`TTS 预置音` / `LLM 已切换到 fallback` / `过载降级` / `单轮预算耗尽`
-2. `/metrics` 含 `xiaozhi_circuit_state`、`xiaozhi_degraded_total`、`xiaozhi_overload_shed_total`
+2. `/metrics` 含 `xiaozhi_circuit_state`、`xiaozhi_degraded_total`、`xiaozhi_overload_shed_total`、`xiaozhi_inflight`
 3. 主备皆失败或过载时设备仍能听到提示并正常 stop
 
 ### 本轮新增配置
