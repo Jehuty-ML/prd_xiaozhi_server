@@ -180,6 +180,8 @@ class ResilienceSettings:
     overload_max_concurrent_llm: int = 80
     overload_tts_text_queue_threshold: int = 80
     overload_tts_audio_queue_threshold: int = 120
+    # AudioRateController 待发音频帧数阈值（帧≈60ms；播发线程会把包从 tts_audio_queue 挪到这里）
+    overload_audio_rate_queue_threshold: int = 80
     # 有界队列容量（满则丢最旧）；默认与阈值一致，避免阈值永远达不到
     overload_tts_text_queue_maxsize: int = 80
     overload_tts_audio_queue_maxsize: int = 120
@@ -299,6 +301,12 @@ def get_resilience_settings(config: Optional[dict] = None) -> ResilienceSettings
             overload.get(
                 "tts_audio_queue_threshold",
                 raw.get("overload_tts_audio_queue_threshold", 120),
+            )
+        ),
+        overload_audio_rate_queue_threshold=int(
+            overload.get(
+                "audio_rate_queue_threshold",
+                raw.get("overload_audio_rate_queue_threshold", 80),
             )
         ),
         overload_tts_text_queue_maxsize=max(
@@ -595,7 +603,7 @@ def reset_inflight_for_tests() -> None:
 
 
 def check_system_overload(conn: Any) -> Optional[str]:
-    """过载检测：全局在途对话/LLM + 本连接 TTS/上报队列。返回原因或 None。"""
+    """过载检测：全局在途对话/LLM + 本连接 TTS/流控/上报积压。返回原因或 None。"""
     settings = get_resilience_settings(getattr(conn, "config", None))
     if not settings.enabled or not settings.overload_enabled:
         return None
@@ -621,6 +629,16 @@ def check_system_overload(conn: Any) -> Optional[str]:
             aq = tts.tts_audio_queue.qsize()
             if aq >= settings.overload_tts_audio_queue_threshold:
                 return f"tts_audio_queue={aq}"
+        except Exception:
+            pass
+
+    # 播发线程常把包从 tts_audio_queue 挪进 rate controller；只看前者会漏掉设备侧待发积压
+    rc = getattr(conn, "audio_rate_controller", None)
+    if rc is not None:
+        try:
+            pending = int(rc.pending_audio_count())
+            if pending >= settings.overload_audio_rate_queue_threshold:
+                return f"audio_rate_queue={pending}"
         except Exception:
             pass
 
@@ -986,10 +1004,14 @@ async def async_call_with_resilience(
 
 
 def is_tts_queue_overload_reason(reason: Optional[str]) -> bool:
-    """TTS 文本/音频队列过载：再往队列塞降级消息只会雪崩。"""
+    """TTS 文本/音频队列或流控待发积压过载：再往播发路径塞降级消息只会雪崩。"""
     if not reason:
         return False
-    return reason.startswith("tts_text_queue") or reason.startswith("tts_audio_queue")
+    return (
+        reason.startswith("tts_text_queue")
+        or reason.startswith("tts_audio_queue")
+        or reason.startswith("audio_rate_queue")
+    )
 
 
 def enqueue_file_degradation(
@@ -1061,8 +1083,8 @@ def speak_degradation(
     if not getattr(conn, "tts", None):
         return
 
-    # TTS 文本/音频队列已过载时：故意不入队、不播降级话。
-    # 原因：现有 FILE/TEXT 降级与预置音播放都仍走 tts_text_queue / tts_audio_queue，
+    # TTS 文本/音频队列或 AudioRateController 待发积压已过载时：故意不入队、不播降级话。
+    # 原因：现有 FILE/TEXT 降级与预置音播放都仍走 tts_*_queue → rate controller，
     # 再 put 只会顶掉或拉长积压，加重雪崩；此时静默 shed + 指标是当前管线下更稳的选择。
     # 若要可感知降级，需另做「绕过 TTS 队列、直接 WS 下发短预置 opus」的短路径后再接这里。
     if is_tts_queue_overload_reason(overload_reason):

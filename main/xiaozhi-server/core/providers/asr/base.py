@@ -10,6 +10,7 @@ import asyncio
 import tempfile
 import traceback
 import threading
+import concurrent.futures
 
 from abc import ABC, abstractmethod
 from config.logger import setup_logging
@@ -48,7 +49,14 @@ class ASRProviderBase(ABC):
                     handleAudioMessage(conn, message),
                     conn.loop,
                 )
-                future.result()
+                # 禁止无限阻塞：loop 卡住时消费者停转，有界 asr 队列只能狂丢帧
+                try:
+                    future.result(timeout=15.0)
+                except concurrent.futures.TimeoutError:
+                    future.cancel()
+                    logger.bind(tag=TAG).warning(
+                        "ASR 处理等待事件循环超时(15s)，跳过本帧以免堵死消费者"
+                    )
             except queue.Empty:
                 continue
             except Exception as e:

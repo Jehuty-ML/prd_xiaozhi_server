@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import queue
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 
 class DroppingQueue(queue.Queue):
@@ -13,10 +13,17 @@ class DroppingQueue(queue.Queue):
     避免 put ↔ put_nowait 递归。
     """
 
-    def __init__(self, maxsize: int = 0, *, name: str = ""):
+    def __init__(
+        self,
+        maxsize: int = 0,
+        *,
+        name: str = "",
+        conn_id_getter: Optional[Callable[[], Optional[str]]] = None,
+    ):
         super().__init__(maxsize=max(0, int(maxsize)))
         self.name = name or "queue"
         self.dropped = 0
+        self._conn_id_getter = conn_id_getter
 
     def put(self, item: Any, block: bool = True, timeout: Optional[float] = None) -> None:
         if self.maxsize <= 0:
@@ -47,6 +54,12 @@ class DroppingQueue(queue.Queue):
         try:
             from core.utils import metrics as metrics_mod
 
-            metrics_mod.set_queue_depth(self.name, self.qsize())
+            conn_id = None
+            if self._conn_id_getter is not None:
+                try:
+                    conn_id = self._conn_id_getter()
+                except Exception:
+                    conn_id = None
+            metrics_mod.set_queue_depth(self.name, self.qsize(), conn_id=conn_id)
         except Exception:
             pass

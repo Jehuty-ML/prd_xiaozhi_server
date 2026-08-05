@@ -55,7 +55,7 @@ server:
   # 本地覆盖请改 data/.config.yaml 同名段，不要只改本文件
   connection:
     # 单进程最大并发 WebSocket 连接数
-    max_connections: 500
+    max_connections: 200
     # 同一 device-id 最大并发连接数（ESP 设备通常 1～2）
     max_connections_per_device: 2
     # 聊天上报队列上限，满则丢弃新上报避免内存膨胀
@@ -91,6 +91,8 @@ server:
       max_concurrent_llm: 80
       tts_text_queue_threshold: 80
       tts_audio_queue_threshold: 120
+      # AudioRateController 待发音频帧数（≈60ms/帧）；播发后从 tts_audio_queue 挪到此处
+      audio_rate_queue_threshold: 80
       # 有界容量（满则丢最旧）；建议 ≥ 对应 threshold
       tts_text_queue_maxsize: 80
       tts_audio_queue_maxsize: 120

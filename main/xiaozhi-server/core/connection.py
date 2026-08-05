@@ -196,7 +196,11 @@ class ConnectionHandler:
             asr_q_max = 200
         from core.utils.bounded_queue import DroppingQueue
 
-        self.asr_audio_queue = DroppingQueue(maxsize=asr_q_max, name="asr_audio")
+        self.asr_audio_queue = DroppingQueue(
+            maxsize=asr_q_max,
+            name="asr_audio",
+            conn_id_getter=lambda: getattr(self, "session_id", None),
+        )
         self.current_speaker = None  # 存储当前说话人
         self.introduced_speakers = set()  # 已"首次引入"的说话人，控制只在首轮带名字
         self.system_introduced_speakers = set()  # 已在 system 注入过身份的说话人，控制 system 身份只首轮出现
@@ -1870,35 +1874,64 @@ class ConnectionHandler:
         """聊天记录上报工作线程"""
         while not self.stop_event.is_set():
             try:
-                # 从队列获取数据，设置超时以便定期检查停止事件
                 item = self.report_queue.get(timeout=1)
-                if item is None:  # 检测毒丸对象
-                    break
-                try:
-                    # 检查线程池状态
-                    if self.executor is None:
-                        continue
-                    # 提交任务到线程池
-                    self.executor.submit(self._process_report, *item)
-                except Exception as e:
-                    self.logger.bind(tag=TAG).error(f"聊天记录上报线程异常: {e}")
             except queue.Empty:
                 continue
             except Exception as e:
                 self.logger.bind(tag=TAG).error(f"聊天记录上报工作线程异常: {e}")
+                continue
+
+            if item is None:  # 毒丸：标记完成后再退出，避免 join 挂死
+                try:
+                    self.report_queue.task_done()
+                except Exception:
+                    pass
+                break
+
+            handed_off = False
+            try:
+                if self.executor is None:
+                    self.logger.bind(tag=TAG).warning(
+                        "上报线程池已关闭，丢弃本条上报"
+                    )
+                else:
+                    # task_done 由 _process_report.finally 负责
+                    self.executor.submit(self._process_report, *item)
+                    handed_off = True
+            except Exception as e:
+                self.logger.bind(tag=TAG).error(f"聊天记录上报线程异常: {e}")
+
+            if not handed_off:
+                try:
+                    self.report_queue.task_done()
+                except Exception:
+                    pass
 
         self.logger.bind(tag=TAG).info("聊天记录上报线程已退出")
 
     def _process_report(self, type, text, audio_data, report_time):
         """处理上报任务"""
         try:
-            # 执行异步上报（在事件循环中运行）
-            asyncio.run(report(self, type, text, audio_data, report_time))
+            # 线程内复用事件循环，避免每条 asyncio.run() 新建 loop（慢、易打满有界上报队列）
+            # 也不走 conn.loop + result()，以免与主循环 run_in_executor 互相等待死锁
+            tls = getattr(ConnectionHandler, "_report_tls", None)
+            if tls is None:
+                ConnectionHandler._report_tls = threading.local()
+                tls = ConnectionHandler._report_tls
+            loop = getattr(tls, "loop", None)
+            if loop is None or loop.is_closed():
+                loop = asyncio.new_event_loop()
+                tls.loop = loop
+            loop.run_until_complete(
+                report(self, type, text, audio_data, report_time)
+            )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"上报处理异常: {e}")
         finally:
-            # 标记任务完成
-            self.report_queue.task_done()
+            try:
+                self.report_queue.task_done()
+            except Exception:
+                pass
 
     def clearSpeakStatus(self):
         self.client_is_speaking = False
@@ -2006,15 +2039,29 @@ class ConnectionHandler:
                 )
             # 队列水位快照
             try:
+                sid = self.session_id
                 metrics_mod.set_queue_depth(
-                    "report", self.report_queue.qsize() if self.report_queue else 0
+                    "report",
+                    self.report_queue.qsize() if self.report_queue else 0,
+                    conn_id=sid,
                 )
                 if self.tts:
                     metrics_mod.set_queue_depth(
-                        "tts_text", self.tts.tts_text_queue.qsize()
+                        "tts_text",
+                        self.tts.tts_text_queue.qsize(),
+                        conn_id=sid,
                     )
                     metrics_mod.set_queue_depth(
-                        "tts_audio", self.tts.tts_audio_queue.qsize()
+                        "tts_audio",
+                        self.tts.tts_audio_queue.qsize(),
+                        conn_id=sid,
+                    )
+                rc = getattr(self, "audio_rate_controller", None)
+                if rc is not None:
+                    metrics_mod.set_queue_depth(
+                        "audio_rate",
+                        rc.pending_audio_count(),
+                        conn_id=sid,
                     )
             except Exception:
                 pass
@@ -2120,10 +2167,18 @@ class ConnectionHandler:
                 self.stop_event.set()
             self._closing = False
             self._closed = True
+            try:
+                metrics_mod.clear_conn_queue_depths(self.session_id)
+            except Exception:
+                pass
 
     def clear_queues(self):
-        """清空所有任务队列"""
-        queues = [self.report_queue, getattr(self, "asr_audio_queue", None)]
+        """清空 ASR/TTS/流控队列（用户打断用）。
+
+        注意：不上报队列。打断只该停播，聊天记录仍应尽量上报；
+        report_queue 仅在连接关闭时由 _stop_report_thread 收尾。
+        """
+        queues = [getattr(self, "asr_audio_queue", None)]
         if self.tts:
             self.logger.bind(tag=TAG).debug(
                 f"开始清理: TTS队列大小={self.tts.tts_text_queue.qsize()}, 音频队列大小={self.tts.tts_audio_queue.qsize()}"
