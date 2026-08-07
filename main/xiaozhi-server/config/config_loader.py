@@ -63,7 +63,7 @@ async def get_config_from_api_async(config, default_local_server=None):
 
     合并规则：
     - 监听地址（ip/port/http_port/vision_explain/auth_key）始终以本地为准（进程绑定）
-    - server.connection / server.metrics / server.resilience：
+    - server.connection / server.metrics / server.resilience / server.registry：
       默认 YAML < 智控台 API < data/.config.yaml 显式覆盖
     - server.auth.enabled：以 API 为准
     """
@@ -177,6 +177,17 @@ async def get_config_from_api_async(config, default_local_server=None):
         )
     if merged_resilience:
         merged_server["resilience"] = merged_resilience
+
+    # registry：Dialogue 注册心跳；默认 < API < 本地显式覆盖
+    merged_registry = {}
+    if isinstance(default_server.get("registry"), dict):
+        merged_registry = merge_configs(merged_registry, default_server["registry"])
+    if isinstance(api_server.get("registry"), dict):
+        merged_registry = merge_configs(merged_registry, api_server["registry"])
+    if isinstance(custom_server.get("registry"), dict):
+        merged_registry = merge_configs(merged_registry, custom_server["registry"])
+    if merged_registry:
+        merged_server["registry"] = merged_registry
 
     config_data["server"] = merged_server
 

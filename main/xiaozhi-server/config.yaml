@@ -51,6 +51,25 @@ server:
   mqtt_signature_key: null
   # UDP网关配置
   udp_gateway: null
+  # Dialogue 多实例注册与心跳（对齐 Java RedisDialogueServerRegistry）
+  # 启用后本进程向 Redis 注册 websocket 地址；manager-api OTA 优先从存活实例中随机选路
+  # 本地覆盖请改 data/.config.yaml 同名段
+  registry:
+    # 单机/无 Redis 可关；多实例 + manager-api 集群务必开启
+    enabled: false
+    # 可选固定实例 ID；不配则用主机名+短 UUID，也可用环境变量 XIAOZHI_INSTANCE_ID
+    # instance_id: "dialogue-1"
+    # 心跳间隔（秒）；TTL 建议 ≥ 2×interval
+    heartbeat_interval_seconds: 30
+    heartbeat_ttl_seconds: 60
+    redis:
+      # url: redis://:password@127.0.0.1:6379/0  # 若设置则优先于 host/port
+      host: 127.0.0.1
+      port: 6379
+      password: ""
+      # 必须与 manager-api 同库（默认 0）；勿与 resilience.redis.db=1 混用
+      db: 0
+      socket_timeout: 1.0
   # 连接硬上限（生产建议按机器规格调整）
   # 本地覆盖请改 data/.config.yaml 同名段，不要只改本文件
   connection:

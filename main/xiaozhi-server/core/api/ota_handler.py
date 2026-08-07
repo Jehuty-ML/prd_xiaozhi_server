@@ -130,6 +130,23 @@ class OTAHandler(BaseHandler):
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
         """获取websocket地址
 
+        若启用了 Dialogue Redis 注册且有存活实例，优先随机选路；
+        否则回退到 server.websocket / 本机推导地址。
+        """
+        try:
+            from core.utils.dialogue_registry import select_registered_websocket_url
+
+            registered = select_registered_websocket_url()
+            if registered:
+                return registered
+        except Exception as e:
+            self.logger.bind(tag=TAG).debug(f"注册中心选路跳过: {e}")
+
+        return self._get_static_websocket_url(local_ip, port)
+
+    def _get_static_websocket_url(self, local_ip: str, port: int) -> str:
+        """获取静态 websocket 地址（配置或本机推导）
+
         Args:
             local_ip: 本地IP地址
             port: 端口号
