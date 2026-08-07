@@ -3,7 +3,30 @@
 本分支已做生产级加固；按本文配置后可用于自托管生产；默认开发配置勿公网暴露。
 
 安装步骤见 [Deployment.md](./Deployment.md)（仅 Server）/ [Deployment_all.md](./Deployment_all.md)（全模块）。  
-本仓库是双进程：`manager-api`（智控台）+ `xiaozhi-server`（对话网关）。
+本仓库是双进程：`manager-api`（智控台）+ `xiaozhi-server`（对话网关）。  
+主线 `config.yaml` 仍为 **development**；生产用 compose 叠加层，不改主线默认。
+
+---
+
+## 0. 开箱生产（推荐）
+
+```bash
+cd main/xiaozhi-server
+cp .env.example .env          # 改 MYSQL_ROOT_PASSWORD
+# 仅对话 Server
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# 全模块
+docker compose -f docker-compose_all.yml -f docker-compose_all.prod.yml up -d
+```
+
+| 文件 | 作用 |
+|------|------|
+| `docker-compose.prod.yml` | 强制 `XIAOZHI_ENV=production`，挂载生产 overlay |
+| `docker-compose_all.prod.yml` | 全模块同上 |
+| `deploy/production/config.overlay.yaml` | 仅 Server 叠加配置 |
+| `deploy/production/config.overlay.all.yaml` | 全模块（Redis/智控台地址） |
+
+部署后把 overlay 里的 `websocket` / `vision_explain` 改成设备可达地址；全模块还需填写 `manager-api.secret`。
 
 ---
 
@@ -11,22 +34,15 @@
 
 | # | 项 | 做法 |
 |---|----|------|
-| 1 | 环境 | `XIAOZHI_ENV=production`，或 `server.environment: production` |
+| 1 | 环境 | 生产 compose 已强制；或 `XIAOZHI_ENV=production` / `server.environment: production` |
 | 2 | 密钥 | MySQL / Redis / `manager-api.secret` / `server.auth_key` 用强随机值，勿用 `123456` |
 | 3 | 认证 | production 默认强制 auth；勿设 `auth.allow_insecure_disable: true` |
-| 4 | 白名单 | `allowed_devices: []`；production 默认禁止免检（`allow_whitelist_bypass: auto/false`） |
+| 4 | 白名单 | `allowed_devices: []`；production 默认禁止免检 |
 | 5 | 对外地址 | 配置真实 `websocket` / `vision_explain`（公网用 `wss`/`https`） |
 | 6 | 探活 | 编排用 `GET /health`；负载均衡用 `GET /ready`（503=摘流） |
 | 7 | 指标 | 抓取 `GET /metrics` |
 
 参考：[`config.production.example.yaml`](../main/xiaozhi-server/config.production.example.yaml)
-
-```bash
-cd main/xiaozhi-server
-cp .env.example .env   # 必改 MYSQL_ROOT_PASSWORD；确认 XIAOZHI_ENV=production
-docker compose up -d                                    # 仅 Server
-docker compose -f docker-compose_all.yml up -d          # 全模块
-```
 
 未设置 `MYSQL_ROOT_PASSWORD` 时全模块 compose 会失败。
 

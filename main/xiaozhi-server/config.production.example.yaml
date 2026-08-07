@@ -1,6 +1,8 @@
-# 生产环境 data/.config.yaml 参考片段
-# 用法：复制需要的段落到 data/.config.yaml（不要整文件覆盖丢失其它覆盖项）
-# 环境变量 XIAOZHI_ENV=production 也可强制进入生产安全策略
+# 生产环境 data/.config.yaml 参考（或直接用 deploy/production 下 overlay）
+# - 仅 Server：deploy/production/config.overlay.yaml
+# - 全模块：deploy/production/config.overlay.all.yaml
+# 用法：docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# 也可用环境变量 XIAOZHI_ENV=production 强制进入生产安全策略（不改主线 config.yaml）
 
 server:
   environment: production

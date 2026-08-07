@@ -1,0 +1,39 @@
+# 生产叠加配置（全模块：对话 Server + 智控台 + Redis）
+# 由 docker-compose_all.prod.yml 挂载为 data/.config.yaml
+
+server:
+  environment: production
+  # 容器内互访；对外请在网关/反代后改成公网 wss/https
+  websocket: ws://xiaozhi-esp32-server:8000/xiaozhi/v1/
+  vision_explain: http://xiaozhi-esp32-server:8003/mcp/vision/explain
+  auth:
+    enabled: true
+    allow_insecure_disable: false
+    allow_whitelist_bypass: false
+    devices_allowlist_only: false
+    allowed_devices: []
+  health:
+    enabled: true
+    liveness_path: /health
+    readiness_path: /ready
+    reject_when_at_capacity: true
+  metrics:
+    enabled: true
+    path: /metrics
+  connection:
+    max_connections: 200
+    max_connections_per_device: 2
+  registry:
+    enabled: true
+    redis:
+      host: xiaozhi-esp32-server-redis
+      port: 6379
+      # 与 .env 中 REDIS_PASSWORD 一致；无密码可留空
+      password: ""
+      db: 0
+
+# 智控台（容器网络内）
+manager-api:
+  url: http://xiaozhi-esp32-server-web:8002/xiaozhi
+  # 与智控台 secret 保持一致后取消注释
+  # secret: "replace-with-manager-api-secret"
