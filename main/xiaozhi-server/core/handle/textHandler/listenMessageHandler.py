@@ -15,6 +15,7 @@ from core.handle.textMessageHandler import TextMessageHandler
 from core.handle.textMessageType import TextMessageType
 from core.utils.util import remove_punctuation_and_length
 from core.providers.tts.dto.dto import ContentType, TTSMessageDTO, SentenceType
+from core.utils.session_state import SessionEvent
 
 
 TAG = __name__
@@ -34,6 +35,7 @@ class ListenTextMessageHandler(TextMessageHandler):
             )
         if msg_json["state"] == "start":
             # 设备从播放模式切回录音模式,清除所有音频状态和缓冲区
+            conn.transition_session(SessionEvent.LISTEN_START, detail="listen_start")
             conn.reset_audio_states()
         elif msg_json["state"] == "stop":
             # 收到stop但asr未初始化，跳过处理
@@ -67,6 +69,7 @@ class ListenTextMessageHandler(TextMessageHandler):
                     # 提取 tag 后的文本
                     call_text = original_text[len("[device_call]"):].strip()
                     conn.logger.bind(tag=TAG).info(f"收到设备呼叫指令: {call_text}")
+                    conn.enter_detect(detail="device_call")
 
                     # 标记为来电接听模式
                     conn.incoming_call = True
@@ -99,17 +102,20 @@ class ListenTextMessageHandler(TextMessageHandler):
                 enable_greeting = conn.config.get("enable_greeting", True)
 
                 if is_wakeup_words and not enable_greeting:
-                    # 如果是唤醒词，且关闭了唤醒词回复，就不用回答
+                    # 唤醒但不回复：进入 DETECT 等待指令，协议上仍打一下 stt/stop
+                    conn.enter_detect(detail="wakeup_no_greeting")
                     await send_stt_message(conn, original_text)
                     await send_tts_message(conn, "stop", None)
-                    conn.client_is_speaking = False
+                    conn.clearSpeakStatus()
+                    # 播控结束后回到 DETECT，武装空窗超时
+                    conn.enter_detect(detail="await_command")
                 elif is_wakeup_words:
-                    conn.just_woken_up = True
+                    conn.enter_detect(detail="wakeup_greeting")
                     # 上报纯文字数据（复用ASR上报功能，但不提供音频数据）
                     enqueue_asr_report(conn, "嘿，你好呀", [])
                     await startToChat(conn, "嘿，你好呀")
                 else:
-                    conn.just_woken_up = True
+                    conn.enter_detect(detail="detect_command")
                     # 上报纯文字数据（复用ASR上报功能，但不提供音频数据）
                     enqueue_asr_report(conn, original_text, [])
                     # 否则需要LLM对文字内容进行答复

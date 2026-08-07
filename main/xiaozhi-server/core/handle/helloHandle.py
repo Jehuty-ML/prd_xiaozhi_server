@@ -14,6 +14,7 @@ from core.utils.wakeup_word import WakeupWordsConfig
 from core.handle.sendAudioHandle import sendAudioMessage, send_tts_message
 from core.utils.util import remove_punctuation_and_length, opus_datas_to_wav_bytes
 from core.providers.tools.device_mcp import MCPClient, send_mcp_initialize_message
+from core.utils.session_state import SessionEvent
 
 TAG = __name__
 
@@ -84,8 +85,9 @@ async def checkWakeupWords(conn: "ConnectionHandler", text):
     if filtered_text not in conn.config.get("wakeup_words"):
         return False
 
-    conn.just_woken_up = True
+    conn.enter_detect(detail="wakeup_cache")
     await send_tts_message(conn, "start")
+    conn.transition_session(SessionEvent.TTS_START, detail="wakeup_cache")
 
     # 获取当前音色
     voice = getattr(conn.tts, "voice", "default")

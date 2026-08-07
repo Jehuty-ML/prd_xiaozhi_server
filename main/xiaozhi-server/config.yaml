@@ -178,6 +178,8 @@ log:
 delete_audio: true
 # 没有语音输入多久后断开连接(秒)，默认2分钟，即120秒
 close_connection_no_voice_time: 120
+# 唤醒 DETECT 后无人说话回 IDLE 的空窗超时(秒)；<=0 关闭
+detect_timeout_seconds: 10
 # TTS请求超时时间(秒)
 tts_timeout: 10
 # 工具调用超时时间(秒)
