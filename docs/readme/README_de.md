@@ -154,7 +154,7 @@ Möchten Sie die Nutzungseffekte sehen? Klicken Sie auf die Videos unten 🎥
 
 1. Dieses Projekt ist Open-Source-Software. Diese Software hat keine kommerzielle Partnerschaft mit Drittanbieter-API-Dienstleistern (einschließlich, aber nicht beschränkt auf Spracherkennung, große Modelle, Sprachsynthese und andere Plattformen), mit denen sie sich verbindet, und bietet keine Garantie für deren Servicequalität oder finanzielle Sicherheit. Es wird empfohlen, dass Benutzer Dienstleister mit entsprechenden Geschäftslizenzen bevorzugen und deren Servicevereinbarungen und Datenschutzrichtlinien sorgfältig lesen. Diese Software hostet keine Kontoschlüssel, nimmt nicht an Geldströmen teil und trägt nicht das Risiko von Verlusten bei Guthaben-Aufladungen.
 
-2. Die Funktionalität dieses Projekts ist nicht vollständig und hat keine Netzwerksicherheitsbewertung bestanden. Bitte verwenden Sie es nicht in Produktionsumgebungen. Wenn Sie dieses Projekt zu Lernzwecken in einer öffentlichen Netzwerkumgebung bereitstellen, stellen Sie bitte sicher, dass notwendige Schutzmaßnahmen vorhanden sind.
+2. Dieser Branch ist produktionsgehärtet; nach [Production](../Production.md) für selbst gehostete Produktion nutzbar. Standard-Entwicklungseinstellungen nicht öffentlich exponieren.
 
 ---
 

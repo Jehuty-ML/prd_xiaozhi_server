@@ -155,7 +155,7 @@ Muốn xem hiệu quả sử dụng? Hãy xem video 🎥
 1. Dự án này là phần mềm mã nguồn mở, phần mềm này không có quan hệ hợp tác thương mại với bất kỳ nhà cung cấp dịch vụ API bên thứ ba nào (bao gồm nhưng không giới hạn ở các nền tảng nhận dạng giọng nói, mô hình lớn, tổng hợp giọng nói, v.v.), và không đảm bảo chất lượng dịch vụ cũng như an toàn tài chính của họ.
 Khuyến nghị người dùng ưu tiên lựa chọn nhà cung cấp dịch vụ có giấy phép kinh doanh liên quan và đọc kỹ thỏa thuận dịch vụ và chính sách bảo mật của họ. Phần mềm này không lưu trữ bất kỳ khóa tài khoản nào, không tham gia vào luồng tiền và không chịu rủi ro mất tiền nạp.
 
-2. Chức năng của dự án này chưa hoàn thiện và chưa qua đánh giá bảo mật mạng, vui lòng không sử dụng trong môi trường sản xuất. Nếu bạn triển khai dự án này trong môi trường mạng công cộng để học tập, vui lòng thực hiện các biện pháp bảo vệ cần thiết.
+2. Nhánh này đã củng cố hướng sản xuất; sau khi cấu hình theo [Production](../Production.md) có thể dùng cho production tự lưu trữ. Không để cấu hình phát triển mặc định lộ ra mạng công cộng.
 
 ---
 

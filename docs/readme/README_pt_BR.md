@@ -154,7 +154,7 @@ Quer ver os efeitos de uso? Clique nos vídeos abaixo 🎥
 
 1. Este projeto é um software de código aberto. Este software não possui parceria comercial com nenhum provedor de serviços de API de terceiros (incluindo, mas não se limitando a reconhecimento de fala, modelos de linguagem, síntese de voz e outras plataformas) com os quais se conecta, e não fornece nenhuma forma de garantia quanto à qualidade de serviço ou segurança financeira desses provedores. Recomenda-se que os usuários priorizem provedores de serviço com licenças comerciais relevantes e leiam cuidadosamente seus termos de serviço e políticas de privacidade. Este software não armazena nenhuma chave de conta, não participa de fluxos de fundos e não assume o risco de perda de fundos recarregados.
 
-2. A funcionalidade deste projeto não está completa e não passou por avaliação de segurança de rede. Por favor, não o utilize em ambientes de produção. Se você implantar este projeto para fins de aprendizado em um ambiente de rede pública, certifique-se de que as medidas de proteção necessárias estejam em vigor.
+2. Este branch está endurecido para produção; após [Production](../Production.md), pode ser usado em produção auto-hospedada. Não exponha configurações padrão de desenvolvimento publicamente.
 
 ---
 

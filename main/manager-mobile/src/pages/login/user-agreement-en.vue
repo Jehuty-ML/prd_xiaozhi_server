@@ -431,7 +431,7 @@ function goBack() {
         </view>
         <view class="mb-[40rpx] ml-[20rpx]">
           <text class="text-[28rpx] text-[#333333] leading-[1.8]">
-            8.6 Security Warning: This project functions are not fully developed and have not passed network security assessment. Please do not use it in production environments. If you deploy this project for learning in a public network environment, you must take necessary protective measures, including but not limited to setting strong passwords, restricting access permissions, enabling HTTPS encrypted transmission, etc.
+            8.6 Production notice: This branch is production-hardened; after following Production (docs/Production.md), it may be used for self-hosted production. Do not expose default development settings publicly.
           </text>
         </view>
 
