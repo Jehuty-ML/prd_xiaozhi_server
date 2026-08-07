@@ -1,0 +1,27 @@
+server:
+  name: xiaozhi-audio-preprocess
+  phase: 5
+  environment: development
+
+selected_module:
+  VAD: StubVAD
+
+VAD:
+  StubVAD:
+    type: stub
+    energy_threshold: 200
+    min_silence_duration_ms: 400
+    frame_window_threshold: 3
+  SileroVAD:
+    type: silero
+    # Relative to xiaozhi-server models/ (or absolute path to onnx)
+    model_dir: ../../xiaozhi-server/models/snakers4_silero-vad
+    threshold: 0.5
+    threshold_low: 0.2
+    min_silence_duration_ms: 200
+
+sample_rate: 16000
+# Min PCM bytes before calling ASR (~0.6s of 16kHz int16 frames @ 60ms)
+min_asr_pcm_bytes: 19200
+# Pre-roll frames kept before first voice (auto mode)
+pre_roll_frames: 10

@@ -9,6 +9,10 @@ message AudioChunkRequest {
   string client_id = 2;
   bytes data = 3;
   string format = 4;  // opus | pcm | raw
+  // Optional MQTT/WS media timestamp (ms) for AEC reference matching
+  int64 timestamp = 5;
+  bool aec_enabled = 6;
+  string listen_mode = 7;  // auto | manual | realtime (hint from access)
 }
 
 message AudioChunkResponse {
@@ -70,6 +74,8 @@ message TtsAudioRequest {
   // Device protocol state: "" (audio only) | start | sentence_start | stop
   string state = 8;
   string session_id = 9;
+  // Optional playback timestamp (ms) for AEC reference pairing
+  int64 timestamp = 10;
 }
 
 message TtsAudioResponse {
@@ -128,10 +134,56 @@ message BroadcastSpeakResponse {
   int32 spoken = 4;
 }
 
-// Preprocess: uplink audio from access
+// Access → preprocess: listen start/stop/detect + mode / AEC flag
+message ListenControlRequest {
+  string message_id = 1;
+  string client_id = 2;
+  string state = 3;  // start | stop | detect
+  string mode = 4;   // auto | manual | realtime
+  string text = 5;   // detect inject text
+  bool aec_enabled = 6;
+}
+
+message ListenControlResponse {
+  int32 code = 1;
+  string msg = 2;
+  string result = 3;
+}
+
+// Speaker (or access) → preprocess: TTS PCM reference for AEC
+message AecReferenceRequest {
+  string message_id = 1;
+  string client_id = 2;
+  int64 timestamp = 3;
+  bytes pcm = 4;
+  string format = 5;  // pcm (int16 LE) | opus
+}
+
+message AecReferenceResponse {
+  int32 code = 1;
+  string msg = 2;
+  string result = 3;
+}
+
+message PreprocessAbortRequest {
+  string message_id = 1;
+  string client_id = 2;
+  string reason = 3;
+}
+
+message PreprocessAbortResponse {
+  int32 code = 1;
+  string msg = 2;
+  string result = 3;
+}
+
+// Preprocess: uplink audio from access + VAD session control
 service AudioPreprocessService {
   rpc SendAudioChunk(AudioChunkRequest) returns (AudioChunkResponse);
   rpc SendText(TextRequest) returns (TextResponse);
+  rpc ControlListen(ListenControlRequest) returns (ListenControlResponse);
+  rpc PushAecReference(AecReferenceRequest) returns (AecReferenceResponse);
+  rpc Abort(PreprocessAbortRequest) returns (PreprocessAbortResponse);
 }
 
 // Receiver: ASR

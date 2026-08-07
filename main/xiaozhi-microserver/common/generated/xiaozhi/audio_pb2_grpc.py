@@ -26,7 +26,7 @@ if _version_not_supported:
 
 
 class AudioPreprocessServiceStub:
-    """Preprocess: uplink audio from access
+    """Preprocess: uplink audio from access + VAD session control
     """
 
     def __init__(self, channel):
@@ -45,10 +45,25 @@ class AudioPreprocessServiceStub:
                 request_serializer=audio__pb2.TextRequest.SerializeToString,
                 response_deserializer=audio__pb2.TextResponse.FromString,
                 _registered_method=True)
+        self.ControlListen = channel.unary_unary(
+                '/xiaozhi.audio.AudioPreprocessService/ControlListen',
+                request_serializer=audio__pb2.ListenControlRequest.SerializeToString,
+                response_deserializer=audio__pb2.ListenControlResponse.FromString,
+                _registered_method=True)
+        self.PushAecReference = channel.unary_unary(
+                '/xiaozhi.audio.AudioPreprocessService/PushAecReference',
+                request_serializer=audio__pb2.AecReferenceRequest.SerializeToString,
+                response_deserializer=audio__pb2.AecReferenceResponse.FromString,
+                _registered_method=True)
+        self.Abort = channel.unary_unary(
+                '/xiaozhi.audio.AudioPreprocessService/Abort',
+                request_serializer=audio__pb2.PreprocessAbortRequest.SerializeToString,
+                response_deserializer=audio__pb2.PreprocessAbortResponse.FromString,
+                _registered_method=True)
 
 
 class AudioPreprocessServiceServicer:
-    """Preprocess: uplink audio from access
+    """Preprocess: uplink audio from access + VAD session control
     """
 
     def SendAudioChunk(self, request, context):
@@ -58,6 +73,24 @@ class AudioPreprocessServiceServicer:
         raise NotImplementedError('Method not implemented!')
 
     def SendText(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ControlListen(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def PushAecReference(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Abort(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -76,6 +109,21 @@ def add_AudioPreprocessServiceServicer_to_server(servicer, server):
                     request_deserializer=audio__pb2.TextRequest.FromString,
                     response_serializer=audio__pb2.TextResponse.SerializeToString,
             ),
+            'ControlListen': grpc.unary_unary_rpc_method_handler(
+                    servicer.ControlListen,
+                    request_deserializer=audio__pb2.ListenControlRequest.FromString,
+                    response_serializer=audio__pb2.ListenControlResponse.SerializeToString,
+            ),
+            'PushAecReference': grpc.unary_unary_rpc_method_handler(
+                    servicer.PushAecReference,
+                    request_deserializer=audio__pb2.AecReferenceRequest.FromString,
+                    response_serializer=audio__pb2.AecReferenceResponse.SerializeToString,
+            ),
+            'Abort': grpc.unary_unary_rpc_method_handler(
+                    servicer.Abort,
+                    request_deserializer=audio__pb2.PreprocessAbortRequest.FromString,
+                    response_serializer=audio__pb2.PreprocessAbortResponse.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'xiaozhi.audio.AudioPreprocessService', rpc_method_handlers)
@@ -85,7 +133,7 @@ def add_AudioPreprocessServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class AudioPreprocessService:
-    """Preprocess: uplink audio from access
+    """Preprocess: uplink audio from access + VAD session control
     """
 
     @staticmethod
@@ -132,6 +180,87 @@ class AudioPreprocessService:
             '/xiaozhi.audio.AudioPreprocessService/SendText',
             audio__pb2.TextRequest.SerializeToString,
             audio__pb2.TextResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ControlListen(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/xiaozhi.audio.AudioPreprocessService/ControlListen',
+            audio__pb2.ListenControlRequest.SerializeToString,
+            audio__pb2.ListenControlResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def PushAecReference(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/xiaozhi.audio.AudioPreprocessService/PushAecReference',
+            audio__pb2.AecReferenceRequest.SerializeToString,
+            audio__pb2.AecReferenceResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Abort(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/xiaozhi.audio.AudioPreprocessService/Abort',
+            audio__pb2.PreprocessAbortRequest.SerializeToString,
+            audio__pb2.PreprocessAbortResponse.FromString,
             options,
             channel_credentials,
             insecure,

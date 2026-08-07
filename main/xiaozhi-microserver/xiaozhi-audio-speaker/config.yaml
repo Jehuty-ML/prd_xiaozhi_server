@@ -23,3 +23,5 @@ TTS:
     frame_duration_ms: 60
 
 frame_duration_ms: 60
+# Push decoded TTS PCM to preprocess for AEC (preprocess applies only if client aec=true)
+push_aec_reference: true

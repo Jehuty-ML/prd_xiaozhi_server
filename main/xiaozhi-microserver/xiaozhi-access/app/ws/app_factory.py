@@ -205,7 +205,14 @@ async def _handle_audio(pool: GrpcClientPool, client_id: str, data: bytes) -> No
     import asyncio
 
     message_id = uuid.uuid4().hex
-    logger.info(f"WS audio uplink client_id={client_id} bytes={len(data)}")
+    meta = connection_manager.get_meta(client_id)
+    listen_mode = str(meta.get("listen_mode") or "auto")
+    aec_enabled = bool(meta.get("aec_enabled"))
+    # Device WS uplink is typically Opus; keep "opus" so preprocess can decode.
+    # If payload already looks like PCM (even length, large frames), still ok —
+    # preprocess OpusDecoder falls back to treating bytes as PCM on decode error.
+    fmt = "opus"
+    logger.debug(f"WS audio uplink client_id={client_id} bytes={len(data)}")
     stub = audio_pb2_grpc.AudioPreprocessServiceStub(pool.channel(PREPROCESS_SERVICE))
 
     def _call():
@@ -214,11 +221,14 @@ async def _handle_audio(pool: GrpcClientPool, client_id: str, data: bytes) -> No
                 message_id=message_id,
                 client_id=client_id,
                 data=data,
-                format="raw",
+                format=fmt,
+                aec_enabled=aec_enabled,
+                listen_mode=listen_mode,
             ),
             metadata=pool.metadata(client_id, message_id),
             timeout=30,
         )
 
     resp = await asyncio.to_thread(_call)
-    logger.info(f"Preprocess done client_id={client_id} result={resp.result!r}")
+    if resp.result:
+        logger.info(f"Preprocess done client_id={client_id} result={resp.result!r}")

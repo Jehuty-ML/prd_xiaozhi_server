@@ -1,0 +1,21 @@
+server:
+  name: xiaozhi-audio-receiver
+  phase: 5
+  environment: development
+
+selected_module:
+  ASR: StubASR
+
+ASR:
+  StubASR:
+    type: stub
+    fixed_text: "你好"
+    min_pcm_bytes: 9600
+  OpenAICompatASR:
+    type: openai
+    model_name: whisper-1
+    # OpenAI-compatible transcription endpoint (multipart file upload)
+    url: https://api.openai.com/v1/audio/transcriptions
+    api_key: ""
+    language: zh
+    output_dir: tmp/

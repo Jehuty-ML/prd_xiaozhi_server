@@ -8,10 +8,16 @@ from xiaozhi_common.grpc.server import start_grpc_server
 from xiaozhi_common.nacos.client import create_nacos_client
 from xiaozhi_common.nacos.registry import NacosRegistry
 from xiaozhi import audio_pb2_grpc
+
+from app.core.config_loader import runtime_config
+from app.providers.asr import create_asr
 from app.server.audio_service import AudioReceiverServicer
 
 
 def serve(config: BaseServerConfig) -> None:
+    runtime_config.reload()
+    asr = create_asr(runtime_config.data)
+
     ip = config.get_local_ip()
     port = config.resolve_grpc_port(DEFAULT_PORTS[RECEIVER_SERVICE])
     nacos = create_nacos_client(config)
@@ -24,13 +30,13 @@ def serve(config: BaseServerConfig) -> None:
 
     def register(server):  # noqa: ANN001
         audio_pb2_grpc.add_AudioReceiverServiceServicer_to_server(
-            AudioReceiverServicer(), server
+            AudioReceiverServicer(asr), server
         )
 
     server = start_grpc_server(
         port=port, max_workers=config.rpc_max_connect, register_fn=register
     )
-    logger.info(f"{config.server_name} ready grpc={port}")
+    logger.info(f"{config.server_name} ready grpc={port} (phase-5 ASR)")
     try:
         server.wait_for_termination()
     except KeyboardInterrupt:

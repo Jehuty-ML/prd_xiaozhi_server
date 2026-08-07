@@ -18,3 +18,5 @@ numpy>=1.26.0
 opuslib_next>=1.1.5
 pydub>=0.25.1
 edge-tts>=6.1.0
+# Optional for SileroVAD (phase-5)
+# onnxruntime>=1.16.0

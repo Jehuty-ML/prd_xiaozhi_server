@@ -59,6 +59,14 @@ class AccessAudioServicer(audio_pb2_grpc.AccessAudioServiceServicer):
                 f"Access TTS audio client_id={client_id} bytes={len(audio)} "
                 f"format={request.format or 'opus'}"
             )
+            # Track speaking for barge-in alignment
+            if state != "stop":
+                connection_manager.set_meta(client_id, "speaking", True)
+            else:
+                connection_manager.set_meta(client_id, "speaking", False)
+
+        if state == "stop":
+            connection_manager.set_meta(client_id, "speaking", False)
 
         if not (ok_bin or ok_txt):
             return audio_pb2.TtsAudioResponse(
@@ -71,11 +79,21 @@ class AccessCommandServicer(command_pb2_grpc.AccessCommandServiceServicer):
     def SendCommand(self, request, context):  # noqa: N802, ANN001
         client_id = request.client_id or getattr(context, "client_id", "")
         command = request.command or ""
-        connection_manager.set_state(client_id, command)
-        # close_after_chat: mark meta; do not push a fake command frame to device
-        if command == "close_after_chat":
-            connection_manager.set_meta(client_id, "close_after_chat", True)
-            logger.info(f"Access close_after_chat client_id={client_id}")
+        # Map preprocess listen notifications onto access connection states
+        state_map = {
+            "listen_start": "listening",
+            "listen_stop": "idle",
+            "idle": "idle",
+            "speaking": "speaking",
+            "detect": "detect",
+        }
+        mapped = state_map.get(command, command)
+        connection_manager.set_state(client_id, mapped)
+        # State-only: do not push a fake command frame to the device
+        if command in state_map or command == "close_after_chat":
+            if command == "close_after_chat":
+                connection_manager.set_meta(client_id, "close_after_chat", True)
+            logger.info(f"Access state command client_id={client_id} command={command}")
             return command_pb2.CommandResponse(code=0, msg="ok", result=command)
         frame = json.dumps(
             {"type": "command", "command": command, "payload": request.payload or ""},

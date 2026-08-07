@@ -132,6 +132,12 @@ async def _handle_hello(
     features = payload.get("features")
     if isinstance(features, dict):
         welcome["features"] = features
+        client_id = connection_manager.get_client_id(websocket) or ""
+        if client_id:
+            aec = bool(features.get("aec"))
+            connection_manager.set_meta(client_id, "aec_enabled", aec)
+            if "mcp" in features:
+                connection_manager.set_meta(client_id, "mcp", bool(features.get("mcp")))
     await websocket.send_text(json.dumps(welcome, ensure_ascii=False))
 
 
@@ -147,18 +153,43 @@ async def _handle_listen(
     if mode:
         connection_manager.set_meta(client_id, "listen_mode", str(mode))
 
+    meta = connection_manager.get_meta(client_id)
+    listen_mode = str(meta.get("listen_mode") or mode or "auto")
+    aec_enabled = bool(meta.get("aec_enabled"))
+
     if state == "start":
         connection_manager.set_state(client_id, "listening")
+        await _control_listen(
+            pool,
+            client_id,
+            state="start",
+            mode=listen_mode,
+            aec_enabled=aec_enabled,
+        )
         return
     if state == "stop":
         connection_manager.set_state(client_id, "idle")
+        await _control_listen(
+            pool,
+            client_id,
+            state="stop",
+            mode=listen_mode,
+            aec_enabled=aec_enabled,
+        )
         return
     if state == "detect":
         connection_manager.set_state(client_id, "detect")
         content = payload.get("text") or payload.get("data") or ""
         if content:
-            # Keep phase-1 smoke path: inject text through preprocess stub pipeline.
-            await _inject_text(pool, client_id, str(content))
+            # Detect inject: ControlListen(detect) or legacy SendText path
+            await _control_listen(
+                pool,
+                client_id,
+                state="detect",
+                mode=listen_mode,
+                text=str(content),
+                aec_enabled=aec_enabled,
+            )
         return
 
     # Backward-compatible smoke: {"type":"listen","text":"..."} without state
@@ -166,6 +197,45 @@ async def _handle_listen(
     if content:
         await _inject_text(pool, client_id, str(content))
 
+
+async def _control_listen(
+    pool: GrpcClientPool,
+    client_id: str,
+    *,
+    state: str,
+    mode: str = "auto",
+    text: str = "",
+    aec_enabled: bool = False,
+) -> None:
+    message_id = uuid.uuid4().hex
+
+    def _call():
+        stub = audio_pb2_grpc.AudioPreprocessServiceStub(
+            pool.channel(PREPROCESS_SERVICE)
+        )
+        return stub.ControlListen(
+            audio_pb2.ListenControlRequest(
+                message_id=message_id,
+                client_id=client_id,
+                state=state,
+                mode=mode,
+                text=text,
+                aec_enabled=aec_enabled,
+            ),
+            metadata=pool.metadata(client_id, message_id),
+            timeout=30,
+        )
+
+    try:
+        resp = await asyncio.to_thread(_call)
+        logger.info(
+            f"ControlListen done client={client_id} state={state} result={resp.result!r}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"ControlListen failed: {exc}")
+        # Fallback for detect: keep smoke path via SendText
+        if state == "detect" and text:
+            await _inject_text(pool, client_id, text)
 
 async def _handle_abort(
     pool: GrpcClientPool,
@@ -187,7 +257,7 @@ async def _handle_abort(
             ensure_ascii=False,
         )
     )
-    # Fan-out abort to agent (cancel chat) + speaker (drain TTS queues)
+    # Fan-out abort to agent (cancel chat) + speaker (drain TTS) + preprocess (VAD)
     message_id = uuid.uuid4().hex
 
     def _abort_agent():
@@ -210,6 +280,18 @@ async def _handle_abort(
             timeout=5,
         )
 
+    def _abort_preprocess():
+        stub = audio_pb2_grpc.AudioPreprocessServiceStub(
+            pool.channel(PREPROCESS_SERVICE)
+        )
+        return stub.Abort(
+            audio_pb2.PreprocessAbortRequest(
+                message_id=message_id, client_id=client_id, reason=str(reason)
+            ),
+            metadata=pool.metadata(client_id, message_id),
+            timeout=5,
+        )
+
     try:
         await asyncio.to_thread(_abort_agent)
     except Exception as exc:  # noqa: BLE001
@@ -218,6 +300,10 @@ async def _handle_abort(
         await asyncio.to_thread(_abort_speaker)
     except Exception as exc:  # noqa: BLE001
         logger.debug(f"Speaker abort fan-out skipped: {exc}")
+    try:
+        await asyncio.to_thread(_abort_preprocess)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"Preprocess abort fan-out skipped: {exc}")
     logger.info(f"WS abort client_id={client_id} session={session_id} reason={reason}")
 
 
