@@ -12,6 +12,7 @@ from core.utils.dialogue_registry import (
     HEARTBEAT_KEY_PREFIX,
     REGISTRY_HASH_KEY,
     DialogueServerInfo,
+    DialogueServerRegistrar,
     RedisDialogueServerRegistry,
     get_registry_settings,
     resolve_instance_id,
@@ -177,6 +178,35 @@ class TestRedisDialogueServerRegistry(unittest.TestCase):
             {"server": {"registry": {"instance_id": "fixed-id"}}}
         )
         self.assertEqual(iid, "fixed-id")
+
+
+class TestDialogueServerRegistrarRefresh(unittest.TestCase):
+    def test_refresh_config_updates_websocket_keeps_instance_id(self):
+        cfg = {
+            "server": {
+                "websocket": "ws://old.example:8000/xiaozhi/v1/",
+                "registry": {"enabled": True, "instance_id": "inst-1"},
+            }
+        }
+        registrar = DialogueServerRegistrar(cfg)
+        self.assertEqual(registrar.instance_id, "inst-1")
+        self.assertEqual(
+            registrar._info.websocket_address,
+            "ws://old.example:8000/xiaozhi/v1/",
+        )
+
+        new_cfg = {
+            "server": {
+                "websocket": "ws://new.example:8000/xiaozhi/v1/",
+                "registry": {"enabled": True, "instance_id": "inst-should-ignore"},
+            }
+        }
+        registrar.refresh_config(new_cfg)
+        self.assertEqual(registrar.instance_id, "inst-1")
+        self.assertEqual(
+            registrar._info.websocket_address,
+            "ws://new.example:8000/xiaozhi/v1/",
+        )
 
 
 if __name__ == "__main__":

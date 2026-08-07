@@ -541,6 +541,7 @@ async def apply_session_mode(
 
     mode 未变化时只同步配置、不打断、不 reset。
     mode 变化且设备在线、force_interrupt 时：打断当前对话/播放并 RESET 到 IDLE，再切 mode。
+    广播进行中：只更新结束后的恢复目标，不打断临时 play_only。
     """
     resolved = (mode or "").strip().lower()
     if resolved not in SESSION_MACHINE_PROFILES:
@@ -553,6 +554,11 @@ async def apply_session_mode(
             block = {}
             cfg["session_state"] = block
         block["mode"] = resolved
+
+    # 广播临时 play_only 期间：热更新只改恢复目标，避免结束后还原到旧 mode
+    if getattr(conn, "_broadcast_speak_active", False):
+        conn._broadcast_restore_mode = resolved
+        return True
 
     sm: SessionStateMachine = conn.session_sm
     mode_changed = sm.mode != resolved
@@ -596,6 +602,8 @@ async def speak_broadcast_text(conn: object, text: str) -> bool:
 
     无需事先改全局 session_state.mode（可保持 common）；若原本已是
     play_only，播完仍保持 play_only，不会被误恢复成 common。
+
+    重叠广播：只更新文案并打断当前 TTS，不覆盖已保存的 _broadcast_restore_mode。
     """
     content = (text or "").strip()
     if not content:
@@ -611,10 +619,34 @@ async def speak_broadcast_text(conn: object, text: str) -> bool:
         return False
 
     sm: SessionStateMachine = conn.session_sm
-    conn._broadcast_restore_mode = sm.mode or DEFAULT_SESSION_MODE
+    already_broadcasting = bool(getattr(conn, "_broadcast_speak_active", False))
+    # 仅首次广播快照恢复目标；重叠广播不得把 play_only 写回 restore
+    if not already_broadcasting:
+        conn._broadcast_restore_mode = sm.mode or DEFAULT_SESSION_MODE
     # 先切 mode（内部可能 abort→clearSpeak）；标志要在之后再置，避免被清掉
     try:
-        if sm.mode != PLAY_ONLY_SESSION_MODE:
+        if already_broadcasting:
+            # 软打断：清讲话态但不触发 _finish_broadcast_speak 还原 mode
+            conn._broadcast_speak_active = False
+            try:
+                from core.handle.abortHandle import handleAbortMessage
+
+                await handleAbortMessage(conn)
+            except Exception:
+                conn.client_abort = True
+                if hasattr(conn, "clear_queues"):
+                    try:
+                        conn.clear_queues()
+                    except Exception:
+                        pass
+                sm.transition(SessionEvent.RESET, detail="broadcast_barge_in")
+                if sm.state == SessionState.SPEAKING:
+                    transition_session(
+                        conn, SessionEvent.TTS_END, detail="broadcast_barge_in"
+                    )
+                else:
+                    conn.client_is_speaking = False
+        elif sm.mode != PLAY_ONLY_SESSION_MODE:
             ok_mode = await apply_session_mode(
                 conn, PLAY_ONLY_SESSION_MODE, force_interrupt=True
             )

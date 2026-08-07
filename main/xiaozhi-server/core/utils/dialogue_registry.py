@@ -352,6 +352,32 @@ class DialogueServerRegistrar:
         info.instance_id = self._instance_id
         return info
 
+    def refresh_config(self, config: Dict[str, Any]) -> None:
+        """热更新后刷新配置快照（保留 instance_id）。
+
+        websocket / registry Redis 等变更会体现在后续心跳；Redis 连接参数
+        变化时丢弃旧 client，下次心跳重建。
+        """
+        old = self._settings
+        self._config = config or {}
+        self._settings = get_registry_settings(self._config)
+        self._info = self._build_info()
+        if (
+            old.redis_url != self._settings.redis_url
+            or old.redis_host != self._settings.redis_host
+            or old.redis_port != self._settings.redis_port
+            or old.redis_password != self._settings.redis_password
+            or old.redis_db != self._settings.redis_db
+            or old.redis_socket_timeout != self._settings.redis_socket_timeout
+        ):
+            self._registry = None
+
+    async def push_heartbeat(self) -> None:
+        """立即上报一次心跳（热更新 websocket 后避免 OTA 长时间拿旧地址）。"""
+        if not self._settings.enabled:
+            return
+        await self._beat_once()
+
     def _connect(self) -> RedisDialogueServerRegistry:
         client = build_redis_client(
             url=self._settings.redis_url,
@@ -414,8 +440,8 @@ class DialogueServerRegistrar:
         _clear_active(self)
 
     async def _heartbeat_loop(self) -> None:
-        interval = self._settings.heartbeat_interval_seconds
         while not self._stop.is_set():
+            interval = self._settings.heartbeat_interval_seconds
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=interval)
                 break
