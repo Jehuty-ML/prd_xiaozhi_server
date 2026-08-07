@@ -8,12 +8,18 @@ import unittest
 from typing import List
 
 from core.utils.session_state import (
+    DEFAULT_SESSION_MODE,
     LEGAL_TRANSITIONS,
+    PLAY_ONLY_SESSION_MODE,
+    SESSION_MACHINE_PROFILES,
     SessionEvent,
     SessionState,
     SessionStateMachine,
+    apply_session_mode,
     clear_speak_status,
     enter_detect,
+    is_play_only_mode,
+    resolve_session_mode,
     sync_legacy_flags,
     transition_session,
 )
@@ -62,6 +68,87 @@ class SessionStateMachineTests(unittest.TestCase):
 
     def test_initial_idle(self):
         self.assertEqual(self.sm.state, SessionState.IDLE)
+        self.assertEqual(self.sm.mode, DEFAULT_SESSION_MODE)
+
+    def test_resolve_session_mode(self):
+        self.assertEqual(resolve_session_mode({}), DEFAULT_SESSION_MODE)
+        self.assertEqual(
+            resolve_session_mode({"session_state": {"mode": "common"}}),
+            "common",
+        )
+        self.assertEqual(
+            resolve_session_mode({"session_state": {"mode": "play_only"}}),
+            PLAY_ONLY_SESSION_MODE,
+        )
+        self.assertEqual(
+            resolve_session_mode({"session_state.mode": "common"}),
+            "common",
+        )
+        # 未知 mode 回退 common
+        self.assertEqual(
+            resolve_session_mode({"session_state": {"mode": "game"}}),
+            DEFAULT_SESSION_MODE,
+        )
+
+    def test_switch_mode_play_only_and_unknown(self):
+        self.assertFalse(self.sm.switch_mode("game"))
+        self.assertEqual(self.sm.mode, DEFAULT_SESSION_MODE)
+        self.assertTrue(
+            any("rejected=unknown_mode" in m for m in self.log.warn_msgs)
+        )
+        self.assertTrue(self.sm.switch_mode(PLAY_ONLY_SESSION_MODE))
+        self.assertEqual(self.sm.mode, PLAY_ONLY_SESSION_MODE)
+        self.assertEqual(self.sm.state, SessionState.IDLE)
+        # play_only 禁止聆听/唤醒/对话入口
+        self.assertFalse(self.sm.transition(SessionEvent.LISTEN_START))
+        self.assertFalse(self.sm.transition(SessionEvent.DETECT))
+        self.assertFalse(self.sm.transition(SessionEvent.CHAT_START))
+        self.assertFalse(self.sm.transition(SessionEvent.VOICE_END))
+        self.assertFalse(self.sm.transition(SessionEvent.IDLE_TIMEOUT))
+        # 主路径：IDLE + tts_start → SPEAKING
+        self.assertTrue(self.sm.transition(SessionEvent.TTS_START))
+        self.assertEqual(self.sm.state, SessionState.SPEAKING)
+        # 重入：SPEAKING + tts_start → SPEAKING（新一轮播报）
+        self.assertTrue(self.sm.transition(SessionEvent.TTS_START))
+        self.assertEqual(self.sm.state, SessionState.SPEAKING)
+        self.assertTrue(self.sm.transition(SessionEvent.TTS_END))
+        self.assertEqual(self.sm.state, SessionState.IDLE)
+        self.assertTrue(is_play_only_mode(self.sm.mode))
+
+    def test_play_only_legal_transition_matrix(self):
+        """play_only 合法转移矩阵（含 IDLE→SPEAKING 主路径与 SPEAKING 重入）。"""
+        profile = SESSION_MACHINE_PROFILES[PLAY_ONLY_SESSION_MODE]
+        expected = {
+            (SessionState.IDLE, SessionEvent.TTS_START): SessionState.SPEAKING,
+            (SessionState.IDLE, SessionEvent.ABORT): SessionState.IDLE,
+            (SessionState.SPEAKING, SessionEvent.TTS_START): SessionState.SPEAKING,
+            (SessionState.SPEAKING, SessionEvent.TTS_END): SessionState.IDLE,
+            (SessionState.SPEAKING, SessionEvent.ABORT): SessionState.IDLE,
+        }
+        self.assertEqual(dict(profile.transitions), expected)
+        # 超时类事件入口为空：一律拒绝
+        self.assertEqual(profile.event_allowed_from[SessionEvent.IDLE_TIMEOUT], set())
+        self.assertEqual(profile.event_allowed_from[SessionEvent.DETECT_TIMEOUT], set())
+
+        sm = SessionStateMachine(
+            session_id="po-matrix", logger=self.log, mode=PLAY_ONLY_SESSION_MODE
+        )
+        # IDLE → SPEAKING（开播）
+        self.assertTrue(sm.transition(SessionEvent.TTS_START, detail="open"))
+        self.assertEqual(sm.state, SessionState.SPEAKING)
+        joined = " | ".join(self.log.info_msgs)
+        self.assertIn(
+            "mode=play_only event=tts_start from=IDLE to=SPEAKING", joined
+        )
+        # SPEAKING → SPEAKING（重入）
+        self.assertTrue(sm.transition(SessionEvent.TTS_START, detail="reenter"))
+        self.assertEqual(sm.state, SessionState.SPEAKING)
+        # SPEAKING → IDLE（结束）
+        self.assertTrue(sm.transition(SessionEvent.TTS_END))
+        self.assertEqual(sm.state, SessionState.IDLE)
+        # IDLE abort 幂等
+        self.assertTrue(sm.transition(SessionEvent.ABORT))
+        self.assertEqual(sm.state, SessionState.IDLE)
 
     def test_happy_path_production(self):
         """生产路径：listen → chat_start → tts_start → speaking → tts_end。
@@ -78,7 +165,9 @@ class SessionStateMachineTests(unittest.TestCase):
         self.assertEqual(self.sm.state, SessionState.IDLE)
 
         joined = " | ".join(self.log.info_msgs)
-        self.assertIn("session=s1 event=listen_start from=IDLE to=LISTENING", joined)
+        self.assertIn(
+            "session=s1 mode=common event=listen_start from=IDLE to=LISTENING", joined
+        )
         self.assertIn("event=chat_start from=LISTENING to=THINKING", joined)
         self.assertIn("event=tts_start from=THINKING to=SPEAKING", joined)
         self.assertIn("event=tts_end from=SPEAKING to=IDLE", joined)
@@ -294,6 +383,62 @@ class SessionConnectionWiringTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0)
         self.assertTrue(task.cancelled() or task.done())
         self.assertIsNone(self.conn._detect_timeout_task)
+
+    async def test_apply_session_mode_force_interrupt_to_idle(self):
+        """切换 mode 时强制打断并回 IDLE（模拟在线连接）。"""
+        transition_session(self.conn, SessionEvent.CHAT_START)
+        transition_session(self.conn, SessionEvent.TTS_START)
+        self.assertEqual(self.conn.session_sm.state, SessionState.SPEAKING)
+
+        self.conn.websocket = object()
+        self.conn._closed = False
+        self.conn.clear_queues = lambda: None
+
+        ok = await apply_session_mode(
+            self.conn, PLAY_ONLY_SESSION_MODE, force_interrupt=True
+        )
+        self.assertTrue(ok)
+        self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
+        self.assertEqual(self.conn.session_sm.state, SessionState.IDLE)
+        self.assertFalse(self.conn.client_is_speaking)
+        self.assertEqual(
+            self.conn.config.get("session_state", {}).get("mode"),
+            PLAY_ONLY_SESSION_MODE,
+        )
+
+    async def test_broadcast_speak_auto_play_only_then_restore_common(self):
+        """广播会话：play_only 期间禁对话，clear_speak 后回 common。"""
+        self.conn.websocket = object()
+        self.conn._closed = False
+        self.conn.clear_queues = lambda: None
+        self.conn.config = {"session_state": {"mode": "common"}}
+
+        ok = await apply_session_mode(
+            self.conn, PLAY_ONLY_SESSION_MODE, force_interrupt=True
+        )
+        self.assertTrue(ok)
+        self.conn._broadcast_speak_active = True
+        self.conn._broadcast_restore_mode = DEFAULT_SESSION_MODE
+        self.assertTrue(
+            transition_session(
+                self.conn, SessionEvent.TTS_START, detail="broadcast_speak"
+            )
+        )
+        self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
+        self.assertEqual(self.conn.session_sm.state, SessionState.SPEAKING)
+        # 广播期间禁止聆听
+        self.assertFalse(
+            self.conn.session_sm.transition(SessionEvent.LISTEN_START)
+        )
+
+        clear_speak_status(self.conn)
+        self.assertFalse(getattr(self.conn, "_broadcast_speak_active", False))
+        self.assertEqual(self.conn.session_sm.mode, DEFAULT_SESSION_MODE)
+        self.assertEqual(self.conn.session_sm.state, SessionState.IDLE)
+        self.assertEqual(
+            self.conn.config.get("session_state", {}).get("mode"),
+            DEFAULT_SESSION_MODE,
+        )
 
 
 if __name__ == "__main__":

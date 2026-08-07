@@ -14,7 +14,11 @@ from core.utils.wakeup_word import WakeupWordsConfig
 from core.handle.sendAudioHandle import sendAudioMessage, send_tts_message
 from core.utils.util import remove_punctuation_and_length, opus_datas_to_wav_bytes
 from core.providers.tools.device_mcp import MCPClient, send_mcp_initialize_message
-from core.utils.session_state import SessionEvent
+from core.utils.session_state import (
+    SessionEvent,
+    is_play_only_mode,
+    speak_play_only_denied,
+)
 
 TAG = __name__
 
@@ -84,6 +88,12 @@ async def checkWakeupWords(conn: "ConnectionHandler", text):
     _, filtered_text = remove_punctuation_and_length(text)
     if filtered_text not in conn.config.get("wakeup_words"):
         return False
+
+    # play_only：不走唤醒缓存回复，直接播「当前不能对话」
+    if is_play_only_mode(conn):
+        conn.logger.bind(tag=TAG).info("play_only 拒绝唤醒缓存回复，播报降级话术")
+        speak_play_only_denied(conn)
+        return True
 
     conn.enter_detect(detail="wakeup_cache")
     await send_tts_message(conn, "start")

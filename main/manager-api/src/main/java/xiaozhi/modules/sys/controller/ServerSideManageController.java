@@ -25,6 +25,7 @@ import xiaozhi.common.constant.Constant;
 import xiaozhi.common.exception.ErrorCode;
 import xiaozhi.common.exception.RenException;
 import xiaozhi.common.utils.Result;
+import xiaozhi.modules.sys.dto.BroadcastSpeakDTO;
 import xiaozhi.modules.sys.dto.EmitSeverActionDTO;
 import xiaozhi.modules.sys.dto.ServerActionPayloadDTO;
 import xiaozhi.modules.sys.dto.ServerActionResponseDTO;
@@ -84,11 +85,44 @@ public class ServerSideManageController {
         return new Result<Boolean>().ok(emitServerActionByWs(targetWs, emitSeverActionDTO.getAction()));
     }
 
+    @Operation(summary = "向指定 WS 实例全部在线设备广播播报文案")
+    @PostMapping("/broadcast-speak")
+    @LogOperation("广播播报文案")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<Boolean> broadcastSpeak(@RequestBody @Valid BroadcastSpeakDTO dto) {
+        String text = dto.getText() == null ? "" : dto.getText().trim();
+        if (StringUtils.isBlank(text)) {
+            throw new RenException(ErrorCode.NOT_NULL);
+        }
+        String wsText = sysParamsService.getValue(Constant.SERVER_WEBSOCKET, true);
+        if (StringUtils.isBlank(wsText)) {
+            throw new RenException(ErrorCode.SERVER_WEBSOCKET_NOT_CONFIGURED);
+        }
+        String[] wsList = wsText.split(";");
+        if (StringUtils.isBlank(dto.getTargetWs()) || !Arrays.asList(wsList).contains(dto.getTargetWs())) {
+            throw new RenException(ErrorCode.TARGET_WEBSOCKET_NOT_EXIST);
+        }
+        String serverSK = sysParamsService.getValue(Constant.SERVER_SECRET, true);
+        Map<String, Object> content = new HashMap<>();
+        content.put("secret", serverSK);
+        content.put("text", text);
+        return new Result<Boolean>().ok(
+                emitServerActionByWs(dto.getTargetWs(), ServerActionEnum.BROADCAST_SPEAK, content));
+    }
+
     private Boolean emitServerActionByWs(String targetWsUri, ServerActionEnum actionEnum) {
+        return emitServerActionByWs(targetWsUri, actionEnum,
+                Map.of("secret", sysParamsService.getValue(Constant.SERVER_SECRET, true)));
+    }
+
+    private Boolean emitServerActionByWs(String targetWsUri, ServerActionEnum actionEnum,
+            Map<String, Object> content) {
         if (StringUtils.isBlank(targetWsUri) || actionEnum == null) {
             return false;
         }
-        String serverSK = sysParamsService.getValue(Constant.SERVER_SECRET, true);
+        if (content == null) {
+            content = Map.of("secret", sysParamsService.getValue(Constant.SERVER_SECRET, true));
+        }
 
         String deviceId = UUID.randomUUID().toString();
         String clientId = UUID.randomUUID().toString();
@@ -114,9 +148,7 @@ public class ServerSideManageController {
                 .build()) {
             // 如果连接成功则发送一个json数据包并等待服务端响应
             client.sendJson(
-                    ServerActionPayloadDTO.build(
-                            actionEnum,
-                            Map.of("secret", serverSK)));
+                    ServerActionPayloadDTO.build(actionEnum, content));
             // 等待服务端响应并持续监听信息
             client.listener((jsonText) -> {
                 if (StringUtils.isBlank(jsonText)) {

@@ -15,7 +15,11 @@ from core.handle.textMessageHandler import TextMessageHandler
 from core.handle.textMessageType import TextMessageType
 from core.utils.util import remove_punctuation_and_length
 from core.providers.tts.dto.dto import ContentType, TTSMessageDTO, SentenceType
-from core.utils.session_state import SessionEvent
+from core.utils.session_state import (
+    SessionEvent,
+    is_play_only_mode,
+    speak_play_only_denied,
+)
 
 
 TAG = __name__
@@ -34,10 +38,18 @@ class ListenTextMessageHandler(TextMessageHandler):
                 f"客户端拾音模式：{conn.client_listen_mode}"
             )
         if msg_json["state"] == "start":
+            # play_only：禁止进入聆听
+            if is_play_only_mode(conn):
+                conn.reset_audio_states()
+                conn.logger.bind(tag=TAG).info("play_only 忽略 listen start")
+                return
             # 设备从播放模式切回录音模式,清除所有音频状态和缓冲区
             conn.transition_session(SessionEvent.LISTEN_START, detail="listen_start")
             conn.reset_audio_states()
         elif msg_json["state"] == "stop":
+            if is_play_only_mode(conn):
+                conn.reset_audio_states()
+                return
             # 收到stop但asr未初始化，跳过处理
             if conn.asr is None:
                 return
@@ -63,6 +75,20 @@ class ListenTextMessageHandler(TextMessageHandler):
                 filtered_len, filtered_text = remove_punctuation_and_length(
                     original_text
                 )
+
+                # play_only：禁止唤醒/对话；听到唤醒词播降级话
+                if is_play_only_mode(conn):
+                    is_wakeup_words = filtered_text in conn.config.get("wakeup_words")
+                    if is_wakeup_words or original_text.startswith("[device_call]"):
+                        conn.logger.bind(tag=TAG).info(
+                            "play_only 拒绝唤醒/呼叫，播报降级话术"
+                        )
+                        speak_play_only_denied(conn)
+                    else:
+                        conn.logger.bind(tag=TAG).info(
+                            "play_only 忽略 detect 指令文本"
+                        )
+                    return
 
                 # 检查是否是设备呼叫指令 [device_call]
                 if original_text.startswith("[device_call]"):

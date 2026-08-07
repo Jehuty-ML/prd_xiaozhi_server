@@ -180,6 +180,13 @@ delete_audio: true
 close_connection_no_voice_time: 120
 # 唤醒 DETECT 后无人说话回 IDLE 的空窗超时(秒)；<=0 关闭
 detect_timeout_seconds: 10
+# 会话状态机（高级）
+# 全局 mode：智控台改 session_state.mode 后点「通知更新配置」→ 广播本实例全部在线设备
+session_state:
+  # common=正常对话；play_only=仅播放（禁唤醒/收音，唤醒词播降级话）
+  mode: common
+  # play_only 下听到唤醒词时的固定回复
+  play_only_deny_text: 当前不能对话
 # TTS请求超时时间(秒)
 tts_timeout: 10
 # 工具调用超时时间(秒)

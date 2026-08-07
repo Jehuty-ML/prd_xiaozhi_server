@@ -56,11 +56,36 @@ def main():
     assert SessionEvent.ABORT not in EVENT_ALLOWED_FROM
     print("timeout/abort constraints: OK")
 
-    # 4) 全状态 abort
+    # 4) 全状态 abort（common 表）
     for st in SessionState:
         assert (st, SessionEvent.ABORT) in LEGAL_TRANSITIONS
         assert LEGAL_TRANSITIONS[(st, SessionEvent.ABORT)] == SessionState.IDLE
     print("abort from all states: OK")
+
+    # 4b) play_only 矩阵：IDLE→SPEAKING 主路径 + SPEAKING 重入
+    from core.utils.session_state import (
+        PLAY_ONLY_SESSION_MODE,
+        SESSION_MACHINE_PROFILES,
+    )
+
+    po = SESSION_MACHINE_PROFILES[PLAY_ONLY_SESSION_MODE].transitions
+    assert po[(SessionState.IDLE, SessionEvent.TTS_START)] == SessionState.SPEAKING
+    assert po[(SessionState.SPEAKING, SessionEvent.TTS_START)] == SessionState.SPEAKING
+    assert po[(SessionState.SPEAKING, SessionEvent.TTS_END)] == SessionState.IDLE
+    assert po[(SessionState.IDLE, SessionEvent.ABORT)] == SessionState.IDLE
+    assert po[(SessionState.SPEAKING, SessionEvent.ABORT)] == SessionState.IDLE
+    assert len(po) == 5
+
+    sm_po = SessionStateMachine("po", logger=L(), mode=PLAY_ONLY_SESSION_MODE)
+    assert sm_po.mode == PLAY_ONLY_SESSION_MODE
+    assert not sm_po.transition(SessionEvent.LISTEN_START)
+    assert sm_po.transition(SessionEvent.TTS_START)  # IDLE → SPEAKING
+    assert sm_po.state == SessionState.SPEAKING
+    assert sm_po.transition(SessionEvent.TTS_START)  # SPEAKING → SPEAKING
+    assert sm_po.state == SessionState.SPEAKING
+    assert sm_po.transition(SessionEvent.TTS_END)
+    assert sm_po.state == SessionState.IDLE
+    print("play_only matrix (IDLE→SPEAKING + reenter): OK")
 
     # 5) legacy sync
     class C:
@@ -76,11 +101,13 @@ def main():
     # 6) 默认 10s
     from pathlib import Path
 
-    src = Path("core/connection.py").read_text(encoding="utf-8")
+    src = Path("core/utils/session_state.py").read_text(encoding="utf-8")
     assert "detect_timeout_seconds\", 10)" in src or "detect_timeout_seconds', 10)" in src
     cfg = Path("config.yaml").read_text(encoding="utf-8")
     assert "detect_timeout_seconds: 10" in cfg
-    print("default detect_timeout_seconds=10: OK")
+    assert "session_state:" in cfg
+    assert "mode: common" in cfg
+    print("default detect_timeout_seconds=10 + session_state.mode: OK")
 
     # 7) 非法边仍拒绝
     sm2 = SessionStateMachine("s2", logger=L())

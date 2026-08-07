@@ -169,6 +169,22 @@ export default {
                     this.sendWsServerAction(data, callback)
                 })
             }).send();
+    },
+    // 向指定 WS 实例全部在线设备广播播报文案
+    broadcastSpeak(data, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/server/broadcast-speak`)
+            .method('POST')
+            .data(data)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                RequestService.reAjaxFun(() => {
+                    this.broadcastSpeak(data, callback)
+                })
+            }).send();
     }
 
 }

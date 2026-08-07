@@ -10,12 +10,20 @@ from core.handle.abortHandle import handleAbortMessage
 from core.handle.intentHandler import handle_user_intent
 from core.utils.output_counter import check_device_output_limit
 from core.handle.sendAudioHandle import send_stt_message, SentenceType
-from core.utils.session_state import SessionEvent, SessionState
+from core.utils.session_state import (
+    SessionEvent,
+    SessionState,
+    is_play_only_mode,
+    speak_play_only_denied,
+)
 
 TAG = __name__
 
 
 async def handleAudioMessage(conn: "ConnectionHandler", pcm_frame):
+    # play_only：不收音、不跑 ASR
+    if is_play_only_mode(conn):
+        return
     # 当前片段是否有人说话
     have_voice = conn.vad.is_vad(conn, pcm_frame)
     # 如果设备刚刚被唤醒，短暂忽略VAD检测
@@ -45,6 +53,12 @@ async def resume_vad_detection(conn: "ConnectionHandler"):
 
 
 async def startToChat(conn: "ConnectionHandler", text):
+    # play_only：禁止对话；若由唤醒路径进来则播降级话
+    if is_play_only_mode(conn):
+        conn.logger.bind(tag=TAG).info("play_only 拒绝 startToChat，播报降级话术")
+        speak_play_only_denied(conn)
+        return
+
     # 检查输入是否是JSON格式（包含说话人信息）
     speaker_name = None
     actual_text = text
