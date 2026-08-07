@@ -8,6 +8,7 @@
             <div class="operation-header">
               <h2 class="page-title">{{ $t('serverSideManager.pageTitle') }}</h2>
             </div>
+            <p class="broadcast-hint">{{ $t('serverSideManager.broadcastHint') }}</p>
             <el-card class="server-list-card">
               <div v-for="(item, index) in paramsList" :key="index" class="server-list" v-loading="loading">
                 <div class="server-card">
@@ -18,12 +19,31 @@
                   <el-button class="copy-button" type="text" size="small" @click="copyAddress(item.address)">{{ $t('common.copyAddress') }}</el-button>
                 </div>
                 <el-divider />
-                <div class="header-actions">
-                  <CustomButton icon="el-icon-refresh-right" size="small" @click="emitAction(item, actionMap.restart)">{{
-                    $t('serverSideManager.restart') }}</CustomButton>
-                  <CustomButton icon="el-icon-setting" size="small" type="confirm" @click="emitAction(item, actionMap.update_config)">
-                    {{ $t('serverSideManager.updateConfig') }}
-                  </CustomButton>
+                <div class="broadcast-panel">
+                  <div class="broadcast-label">{{ $t('serverSideManager.broadcastSpeakTitle') }}</div>
+                  <el-input
+                    type="textarea"
+                    :rows="3"
+                    maxlength="500"
+                    show-word-limit
+                    v-model="item.speakText"
+                    :placeholder="$t('serverSideManager.broadcastSpeakPlaceholder')"
+                  />
+                  <div class="header-actions broadcast-actions">
+                    <CustomButton
+                      icon="el-icon-microphone"
+                      size="small"
+                      type="confirm"
+                      @click="broadcastSpeak(item)"
+                    >
+                      {{ $t('serverSideManager.broadcastSpeak') }}
+                    </CustomButton>
+                    <CustomButton icon="el-icon-refresh-right" size="small" @click="emitAction(item, actionMap.restart)">{{
+                      $t('serverSideManager.restart') }}</CustomButton>
+                    <CustomButton icon="el-icon-setting" size="small" type="confirm" @click="emitAction(item, actionMap.update_config)">
+                      {{ $t('serverSideManager.updateConfig') }}
+                    </CustomButton>
+                  </div>
                 </div>
                 <el-empty v-if="paramsList.length === 0 && !loading" :description="$t('common.noData')"></el-empty>
               </div>
@@ -81,7 +101,7 @@ export default {
         ({ data }) => {
           this.loading = false;
           if (data.code === 0) {
-            this.paramsList = data.data.map(item => ({ address: item }));
+            this.paramsList = data.data.map(item => ({ address: item, speakText: '' }));
           } else {
             this.$message.error({
               message: data.msg || this.$t('serverSideManager.getServerListFailed'),
@@ -90,6 +110,38 @@ export default {
           }
         }
       );
+    },
+    broadcastSpeak(rowItem) {
+      const text = (rowItem.speakText || '').trim();
+      if (!text) {
+        this.$message.warning(this.$t('serverSideManager.broadcastSpeakEmpty'));
+        return;
+      }
+      this.$confirm(
+        this.$t('serverSideManager.confirmBroadcastSpeak'),
+        this.$t('serverSideManager.broadcastSpeakTitle'),
+        {
+          confirmButtonText: this.$t('serverSideManager.broadcastSpeak'),
+          cancelButtonText: this.$t('common.cancel')
+        }
+      ).then(() => {
+        Api.admin.broadcastSpeak({
+          targetWs: rowItem.address,
+          text
+        }, ({ data }) => {
+          if (data.code !== 0) {
+            this.$message.error({
+              message: data.msg || this.$t('serverSideManager.operationFailed'),
+              showClose: true
+            });
+            return;
+          }
+          this.$message.success({
+            message: this.$t('serverSideManager.broadcastSpeakSuccess'),
+            showClose: true
+          });
+        });
+      }).catch(() => {});
     },
     emitAction(rowItem, actionItem) {
       if (actionItem === undefined || rowItem.address === undefined) {
@@ -158,6 +210,16 @@ export default {
   margin: 0;
 }
 
+.broadcast-hint {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #606266;
+  background: #f5f7fa;
+  border-radius: 8px;
+}
+
 .content-panel {
   display: flex;
   overflow: hidden;
@@ -224,6 +286,24 @@ export default {
 .header-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.broadcast-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.broadcast-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #303133;
+}
+
+.broadcast-actions {
+  margin-top: 4px;
 }
 
 .operation-header {

@@ -8,7 +8,9 @@ import com.fasterxml.jackson.annotation.JsonValue;
  */
 public enum ServerActionEnum {
     RESTART("restart"),
-    UPDATE_CONFIG("update_config");
+    UPDATE_CONFIG("update_config"),
+    /** 向该 WS 实例全部在线设备广播播报文案 */
+    BROADCAST_SPEAK("broadcast_speak");
 
     private final String value;
 

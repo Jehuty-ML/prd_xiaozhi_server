@@ -816,3 +816,14 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202608071030.sql
+  - changeSet:
+      id: 202608071200
+      author: xiaozhi
+      # 曾改过 remark 文案，兼容已执行环境的旧 checksum
+      validCheckSum:
+        - 8:b55fbd82e1cd0b7828084013dba1fb2d
+        - 8:02d5fc289b8f8366b0f83cbb5eca1854
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202608071200.sql

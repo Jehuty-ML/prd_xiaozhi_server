@@ -87,6 +87,60 @@ class ServerTextMessageHandler(TextMessageHandler):
                         }
                     )
                 )
+        # 管理台广播播报文案 → 本实例全部在线设备
+        elif msg_json["action"] == "broadcast_speak":
+            content = msg_json.get("content") or {}
+            text = content.get("text") or ""
+            try:
+                if not conn.server:
+                    await conn.websocket.send(
+                        json.dumps(
+                            {
+                                "type": "server",
+                                "status": "error",
+                                "message": "无法获取服务器实例",
+                                "content": {"action": "broadcast_speak"},
+                            }
+                        )
+                    )
+                    return
+                result = await conn.server.broadcast_speak(str(text), exclude=conn)
+                # 无可用设备也算成功应答，避免管理台临时连接被当成失败
+                status = (
+                    "success"
+                    if result.get("ok")
+                    or result.get("message")
+                    in (
+                        "no speakable online connection",
+                        "no online connection",
+                    )
+                    else "error"
+                )
+                await conn.websocket.send(
+                    json.dumps(
+                        {
+                            "type": "server",
+                            "status": status,
+                            "message": str(result.get("message") or ""),
+                            "content": {
+                                "action": "broadcast_speak",
+                                "matched": result.get("matched", 0),
+                            },
+                        }
+                    )
+                )
+            except Exception as e:
+                conn.logger.bind(tag=TAG).error(f"广播播报失败: {str(e)}")
+                await conn.websocket.send(
+                    json.dumps(
+                        {
+                            "type": "server",
+                            "status": "error",
+                            "message": f"广播播报失败: {str(e)}",
+                            "content": {"action": "broadcast_speak"},
+                        }
+                    )
+                )
         # 重启服务器
         elif msg_json["action"] == "restart":
             await conn.handle_restart(msg_json)

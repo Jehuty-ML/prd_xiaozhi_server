@@ -49,11 +49,13 @@ from core.utils.session_state import (
     SessionEvent,
     SessionState,
     SessionStateMachine,
+    apply_session_mode,
     arm_detect_timeout,
     cancel_detect_timeout,
     clear_speak_status,
     detect_timeout_watchdog,
     enter_detect as session_enter_detect,
+    resolve_session_mode,
     transition_session as session_transition,
 )
 from core.utils.resilience import (
@@ -148,6 +150,8 @@ class ConnectionHandler:
             session_id=self.session_id,
             initial=SessionState.IDLE,
             logger=self.logger.bind(tag="session_state"),
+            # 全局 session_state.mode；智控台「通知更新配置」广播热切换
+            mode=resolve_session_mode(self.config),
         )
         self.just_woken_up = False
         self.detect_entered_at = 0.0
@@ -699,14 +703,22 @@ class ConnectionHandler:
 
     def _initialize_components(self):
         try:
-            if self.tts is None:
+            # 无 TTS 配置时不要硬初始化（管理台临时 WS / 未绑定设备）
+            has_tts_cfg = bool((self.config.get("selected_module") or {}).get("TTS"))
+            if self.tts is None and has_tts_cfg:
                 self.tts = self._initialize_tts()
-            # 打开语音合成通道
-            asyncio.run_coroutine_threadsafe(
-                self.tts.open_audio_channels(self), self.loop
-            )
+            if self.tts is not None:
+                # 打开语音合成通道
+                asyncio.run_coroutine_threadsafe(
+                    self.tts.open_audio_channels(self), self.loop
+                )
             if self.need_bind:
                 self.bind_completed_event.set()
+                return
+            if self.tts is None:
+                self.logger.bind(tag=TAG).debug(
+                    "跳过完整组件初始化：当前连接无 TTS（可能是管理台临时连接）"
+                )
                 return
             self.selected_module_str = build_module_string(
                 self.config.get("selected_module", {})
@@ -998,12 +1010,13 @@ class ConnectionHandler:
         if private_config.get("context_providers", None) is not None:
             self.config["context_providers"] = private_config["context_providers"]
 
-        # 注入替换词到 TTS 模块配置
+        # 注入替换词到 TTS 模块配置（管理台临时连接可能无 TTS）
         if private_config.get("correct_words", None) is not None:
-            select_tts_module = self.config["selected_module"]["TTS"]
-            self.config["TTS"][select_tts_module]["correct_words"] = private_config[
-                "correct_words"
-            ]
+            select_tts_module = (self.config.get("selected_module") or {}).get("TTS")
+            if select_tts_module and select_tts_module in (self.config.get("TTS") or {}):
+                self.config["TTS"][select_tts_module]["correct_words"] = private_config[
+                    "correct_words"
+                ]
 
         # 使用 run_in_executor 在线程池中执行 initialize_modules，避免阻塞主循环
         try:
@@ -1966,6 +1979,16 @@ class ConnectionHandler:
     def enter_detect(self, detail: str = "") -> bool:
         """进入唤醒 DETECT 相位，并开启空窗超时。"""
         return session_enter_detect(self, detail=detail)
+
+    async def apply_session_mode(self, mode: str, *, force_interrupt: bool = True) -> bool:
+        """热切换会话状态机 mode（在线则强制打断并回 IDLE）。"""
+        return await apply_session_mode(self, mode, force_interrupt=force_interrupt)
+
+    async def speak_broadcast_text(self, text: str) -> bool:
+        """管理台下发播报文案。"""
+        from core.utils.session_state import speak_broadcast_text as _speak
+
+        return await _speak(self, text)
 
     def _cancel_detect_timeout(self) -> None:
         cancel_detect_timeout(self)

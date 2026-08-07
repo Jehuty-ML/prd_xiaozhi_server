@@ -41,6 +41,7 @@ from core.auth import AuthManager, AuthenticationError
 from core.utils.modules_initialize import initialize_modules
 from core.utils.util import check_vad_update, check_asr_update
 from core.utils import metrics as metrics_mod
+from core.utils.session_state import resolve_session_mode
 from core.utils.runtime_env import (
     allow_query_authorization,
     resolve_auth_enabled,
@@ -88,6 +89,8 @@ class WebSocketServer:
 
         self.connection_limits = ConnectionLimits.from_config(self.config["server"])
         self.connection_registry = ConnectionRegistry(self.connection_limits)
+        # 在线 ConnectionHandler，供「通知更新配置」时广播 session_state.mode
+        self.active_handlers: set = set()
         metrics_mod.set_ws_max_connections(self.connection_limits.max_connections)
         self.logger.bind(tag=TAG).info(
             f"连接硬上限: max={self.connection_limits.max_connections}, "
@@ -172,6 +175,9 @@ class WebSocketServer:
                 self,  # 传入server实例
             )
             handler.session_id = session_id
+            if hasattr(handler, "session_sm") and handler.session_sm:
+                handler.session_sm.set_session_id(session_id)
+            self.active_handlers.add(handler)
             self.logger.bind(tag=TAG).info(
                 f"连接准入通过 device={device_id} session={handler.session_id} "
                 f"active={self.connection_registry.active_count}/"
@@ -191,6 +197,8 @@ class WebSocketServer:
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"处理连接时出错: {e}")
         finally:
+            if handler is not None:
+                self.active_handlers.discard(handler)
             if acquired:
                 await self.connection_registry.release(session_id)
             # 强制关闭连接（如果还没有关闭的话）
@@ -285,11 +293,85 @@ class WebSocketServer:
                     self._intent = modules["intent"]
                 if "memory" in modules:
                     self._memory = modules["memory"]
+                # 全局 mode：向本实例全部在线连接广播并强制打断回 IDLE
+                new_mode = resolve_session_mode(self.config)
+                await self._apply_session_mode_to_handlers(new_mode)
                 self.logger.bind(tag=TAG).info(f"更新配置任务执行完毕")
                 return True
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"更新服务器配置失败: {str(e)}")
             return False
+
+    async def _apply_session_mode_to_handlers(self, mode: str) -> None:
+        """对所有在线连接热切换 session_state.mode（切换时强制打断）。"""
+        handlers = list(getattr(self, "active_handlers", ()) or ())
+        if not handlers:
+            self.logger.bind(tag=TAG).info(
+                f"session_state.mode={mode}（无在线连接，仅更新服务端配置）"
+            )
+            return
+        self.logger.bind(tag=TAG).info(
+            f"向 {len(handlers)} 个在线连接广播 session_state.mode={mode}"
+        )
+        for handler in handlers:
+            try:
+                await handler.apply_session_mode(mode, force_interrupt=True)
+            except Exception as e:
+                self.logger.bind(tag=TAG).warning(
+                    f"应用 session mode 失败 session={getattr(handler, 'session_id', '-')}: {e}"
+                )
+
+    async def broadcast_speak(self, text: str, *, exclude=None) -> dict:
+        """向本实例可播报的在线设备下发文案（打断后 TTS）。
+
+        exclude: 通常为下发指令的管理台临时连接，不参与播报。
+        """
+        content = (text or "").strip()
+        if not content:
+            return {"ok": False, "matched": 0, "message": "text required"}
+
+        exclude_id = id(exclude) if exclude is not None else None
+        handlers = []
+        for h in list(getattr(self, "active_handlers", ()) or ()):
+            if exclude_id is not None and id(h) == exclude_id:
+                continue
+            if getattr(h, "_closed", False):
+                continue
+            # 管理台临时连接 / 未绑定设备通常没有 TTS，跳过
+            if not getattr(h, "tts", None):
+                continue
+            if getattr(h, "need_bind", False):
+                continue
+            handlers.append(h)
+
+        if not handlers:
+            self.logger.bind(tag=TAG).info(
+                "广播播报：无可用在线设备（需已绑定且 TTS 就绪）"
+            )
+            return {
+                "ok": True,
+                "matched": 0,
+                "message": "no speakable online connection",
+            }
+
+        preview = content if len(content) <= 40 else content[:40] + "…"
+        self.logger.bind(tag=TAG).info(
+            f"向 {len(handlers)} 个在线连接广播播报 text={preview!r}"
+        )
+        applied = 0
+        for handler in handlers:
+            try:
+                if await handler.speak_broadcast_text(content):
+                    applied += 1
+            except Exception as e:
+                self.logger.bind(tag=TAG).warning(
+                    f"广播播报失败 session={getattr(handler, 'session_id', '-')}: {e}"
+                )
+        return {
+            "ok": applied > 0,
+            "matched": applied,
+            "message": "applied" if applied > 0 else "all speak attempts failed",
+        }
 
     async def _handle_auth(self, websocket: websockets.ServerConnection):
         # 先认证，后建立连接
