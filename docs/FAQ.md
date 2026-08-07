@@ -62,10 +62,11 @@ VAD:
 ### 7、部署相关教程
 1、[如何进行最简化部署](./Deployment.md)<br/>
 2、[如何进行全模块部署](./Deployment_all.md)<br/>
-3、[如何部署MQTT网关开启MQTT+UDP协议](./mqtt-gateway-integration.md)<br/>
-4、[如何自动拉取本项目最新代码自动编译和启动](./dev-ops-integration.md)<br/>
-5、[如何与Nginx集成](https://github.com/xinnan-tech/xiaozhi-esp32-server/issues/791)<br/>
-6、[修改代码后怎么编译自己的Docker镜像](./docker-build.md)<br/>
+3、[生产部署（加固 / 探活 / 容量）](./Production.md)<br/>
+4、[如何部署MQTT网关开启MQTT+UDP协议](./mqtt-gateway-integration.md)<br/>
+5、[如何自动拉取本项目最新代码自动编译和启动](./dev-ops-integration.md)<br/>
+6、[如何与Nginx集成](https://github.com/xinnan-tech/xiaozhi-esp32-server/issues/791)<br/>
+7、[修改代码后怎么编译自己的Docker镜像](./docker-build.md)<br/>
 
 ### 8、编译固件相关教程
 1、[如何自己编译小智固件](./firmware-build.md)<br/>

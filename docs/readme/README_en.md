@@ -154,7 +154,7 @@ Want to see the usage effects? Click the videos below 🎥
 
 1. This project is open-source software. This software has no commercial partnership with any third-party API service providers (including but not limited to speech recognition, large models, speech synthesis, and other platforms) that it interfaces with, and does not provide any form of guarantee for their service quality or financial security. It is recommended that users prioritize service providers with relevant business licenses and carefully read their service agreements and privacy policies. This software does not host any account keys, does not participate in fund flows, and does not bear the risk of recharge fund losses.
 
-2. The functionality of this project is not complete and has not passed network security assessment. Please do not use it in production environments. If you deploy this project for learning purposes in a public network environment, please ensure necessary protection measures are in place.
+2. This branch is production-hardened; after following [Production](../Production.md), it may be used for self-hosted production. Do not expose default development settings publicly.
 
 ---
 
