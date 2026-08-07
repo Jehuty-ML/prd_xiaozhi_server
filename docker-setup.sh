@@ -33,6 +33,30 @@ done) &
 # 脚本结束时恢复终端设置
 trap 'stty "$old_stty_settings"' EXIT
 
+# 全模块 compose 要求 .env 提供 MYSQL_ROOT_PASSWORD（不再默认写入 compose）
+# 已有 mysql/data 时绝不能换新随机密码，否则 web 连不上仍为旧口令的库
+ensure_compose_env() {
+    env_file="/opt/xiaozhi-server/.env"
+    if [ -f "$env_file" ] && grep -q '^MYSQL_ROOT_PASSWORD=.\+' "$env_file"; then
+        echo "已存在 $env_file，跳过生成"
+        return 0
+    fi
+    mysql_data="/opt/xiaozhi-server/mysql/data"
+    if [ -d "$mysql_data" ] && [ "$(ls -A "$mysql_data" 2>/dev/null)" ]; then
+        # 历史全模块默认口令；仅用于「有数据卷、尚无 .env」的升级兼容
+        pw="123456"
+        echo "检测到已有 MySQL 数据目录，.env 使用历史默认 MYSQL_ROOT_PASSWORD（请尽快改密并同步 .env）"
+    else
+        pw=$(openssl rand -hex 16 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+        echo "全新安装：已生成随机 MYSQL_ROOT_PASSWORD，请妥善保存 $env_file"
+    fi
+    cat > "$env_file" <<EOF
+TZ=Asia/Shanghai
+XIAOZHI_ENV=production
+MYSQL_ROOT_PASSWORD=$pw
+REDIS_PASSWORD=
+EOF
+}
 
 # 打印彩色字符画
 echo -e "\e[1;32m"  # 设置颜色为亮绿色
@@ -190,7 +214,8 @@ if check_installed; then
         echo "开始启动最新版本服务..."
         # 升级完成后标记，跳过后续下载步骤
         UPGRADE_COMPLETED=1
-        docker compose -f /opt/xiaozhi-server/docker-compose_all.yml up -d
+        ensure_compose_env
+        docker compose -f /opt/xiaozhi-server/docker-compose_all.yml --env-file /opt/xiaozhi-server/.env up -d
     else
           whiptail --title "跳过升级" --msgbox "已取消升级，将继续使用当前版本。" 10 50
           # 跳过升级，继续执行后续安装流程
@@ -350,7 +375,8 @@ fi
 echo "------------------------------------------------------------"
 echo "正在拉取Docker镜像..."
 echo "这可能需要几分钟时间，请耐心等待"
-docker compose -f /opt/xiaozhi-server/docker-compose_all.yml up -d
+ensure_compose_env
+docker compose -f /opt/xiaozhi-server/docker-compose_all.yml --env-file /opt/xiaozhi-server/.env up -d
 
 if [ $? -ne 0 ]; then
     whiptail --title "错误" --msgbox "Docker服务启动失败，请尝试更换镜像源后重新执行本脚本" 10 60
@@ -376,7 +402,8 @@ done
 
     echo "服务端启动成功！正在完成配置..."
     echo "正在启动服务..."
-    docker compose -f /opt/xiaozhi-server/docker-compose_all.yml up -d
+    ensure_compose_env
+    docker compose -f /opt/xiaozhi-server/docker-compose_all.yml --env-file /opt/xiaozhi-server/.env up -d
     echo "服务启动完成！"
 )
 

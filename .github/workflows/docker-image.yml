@@ -11,8 +11,13 @@ on:
       - completed
 
 jobs:
+  gate:
+    name: Release gate (unit tests)
+    uses: ./.github/workflows/xiaozhi-server-tests.yml
+
   release:
     name: Release Docker images
+    needs: gate
     runs-on: ubuntu-latest
     permissions:
       packages: write
