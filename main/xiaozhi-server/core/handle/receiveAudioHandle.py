@@ -57,7 +57,7 @@ async def startToChat(conn: "ConnectionHandler", text):
     if is_play_only_mode(conn):
         conn.logger.bind(tag=TAG).info("play_only 拒绝 startToChat，播报降级话术")
         speak_play_only_denied(conn)
-        return
+        return False
 
     # 检查输入是否是JSON格式（包含说话人信息）
     speaker_name = None
@@ -91,7 +91,7 @@ async def startToChat(conn: "ConnectionHandler", text):
 
     if conn.need_bind:
         await check_bind_device(conn)
-        return
+        return False
 
     # 过载背压：连接/队列水位过高时直接降级，避免越拖越慢
     from core.utils.resilience import (
@@ -111,7 +111,7 @@ async def startToChat(conn: "ConnectionHandler", text):
             UpstreamKind.OVERLOAD,
             overload_reason=overload_reason,
         )
-        return
+        return False
 
     # 如果当日的输出字数大于限定的字数
     if conn.max_output_size > 0:
@@ -119,7 +119,7 @@ async def startToChat(conn: "ConnectionHandler", text):
             conn.headers.get("device-id"), conn.max_output_size
         ):
             await max_out_size(conn)
-            return
+            return True
 
     # manual 模式下不打断正在播放的内容
     if conn.client_is_speaking and conn.client_listen_mode != "manual":
@@ -130,16 +130,29 @@ async def startToChat(conn: "ConnectionHandler", text):
 
     if intent_handled:
         # 如果意图已被处理，不再进行聊天
-        return
+        return True
+
+    # await 之后可能已被切到 play_only（配置热更新/广播），需再校验
+    if is_play_only_mode(conn):
+        conn.logger.bind(tag=TAG).info(
+            "play_only 拒绝 startToChat（await 后复核），播报降级话术"
+        )
+        speak_play_only_denied(conn)
+        return False
 
     # 意图未被处理，继续常规聊天流程，使用实际文本内容
-    conn.transition_session(SessionEvent.CHAT_START, detail="start_to_chat")
+    if not conn.transition_session(SessionEvent.CHAT_START, detail="start_to_chat"):
+        conn.logger.bind(tag=TAG).warning(
+            "CHAT_START 被拒绝，跳过本轮 chat"
+        )
+        return False
     await send_stt_message(conn, actual_text)
 
     # 准备开始新会话
     conn.client_abort = False
 
     conn.executor.submit(conn.chat, actual_text)
+    return True
 
 
 async def no_voice_close_connect(conn: "ConnectionHandler", have_voice):
@@ -174,7 +187,16 @@ async def no_voice_close_connect(conn: "ConnectionHandler", have_voice):
             prompt = end_prompt.get("prompt")
             if not prompt:
                 prompt = "请你以```时间过得真快```未来头，用富有感情、依依不舍的话来结束这场对话吧。！"
-            await startToChat(conn, prompt)
+            started = await startToChat(conn, prompt)
+            # startToChat 早退时可能停在 THINKING，导致无法再 DETECT/LISTEN
+            if not started and conn.session_sm.is_in(SessionState.THINKING):
+                conn.logger.bind(tag=TAG).warning(
+                    "空闲结束语未能启动，RESET 回 IDLE 并关闭连接"
+                )
+                conn.transition_session(
+                    SessionEvent.RESET, detail="idle_close_aborted"
+                )
+                await conn.close()
 
 
 async def max_out_size(conn: "ConnectionHandler"):
