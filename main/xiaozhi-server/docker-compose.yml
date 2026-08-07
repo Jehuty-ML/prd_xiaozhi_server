@@ -1,6 +1,6 @@
-# Docker安装Server
+# Docker 仅运行对话 Server
+# 复制 .env.example 为 .env 后填写密钥，再 docker compose up -d
 
-version: '3'
 services:
   xiaozhi-esp32-server:
     image: ghcr.nju.edu.cn/xinnan-tech/xiaozhi-esp32-server:server_latest
@@ -9,14 +9,24 @@ services:
     security_opt:
       - seccomp:unconfined
     environment:
-      - TZ=UTC
+      - TZ=${TZ:-Asia/Shanghai}
+      # 生产部署请保持 production；本地联调可在 .env 设为 development
+      - XIAOZHI_ENV=${XIAOZHI_ENV:-production}
     ports:
-      # ws服务端
       - "8000:8000"
-      # http服务的端口，用于简单OTA接口(单服务部署)，以及视觉分析接口
       - "8003:8003"
     volumes:
-      # 配置文件目录
       - ./data:/opt/xiaozhi-esp32-server/data
-      # 模型文件挂接，很重要
       - ./models/SenseVoiceSmall/model.pt:/opt/xiaozhi-esp32-server/models/SenseVoiceSmall/model.pt
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/health', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
