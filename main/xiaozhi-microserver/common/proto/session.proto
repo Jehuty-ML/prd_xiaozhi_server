@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package xiaozhi.session;
+
+message AbortRequest {
+  string message_id = 1;
+  string client_id = 2;
+  string reason = 3;
+}
+
+message AbortResponse {
+  int32 code = 1;
+  string msg = 2;
+  string result = 3;
+}
+
+message SessionPingRequest {
+  string message_id = 1;
+  string client_id = 2;
+}
+
+message SessionPingResponse {
+  int32 code = 1;
+  string msg = 2;
+  string result = 3;
+}
+
+// Fan-out abort / barge-in across preprocess, agent, speaker (phase 2+)
+service SessionService {
+  rpc Abort(AbortRequest) returns (AbortResponse);
+  rpc Ping(SessionPingRequest) returns (SessionPingResponse);
+}

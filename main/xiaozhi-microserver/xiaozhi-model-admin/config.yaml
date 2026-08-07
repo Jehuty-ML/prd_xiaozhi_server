@@ -1,0 +1,12 @@
+server:
+  name: xiaozhi-microserver
+  phase: 1
+selected_module:
+  ASR: StubASR
+  TTS: StubTTS
+  LLM: StubLLM
+manager_api:
+  url: ""
+  secret: ""
+  enabled: false
+  note: "Wire manage_api_client here in phase 2"

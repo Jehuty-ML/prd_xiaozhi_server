@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package xiaozhi.admin;
+
+message GetConfigRequest {
+  string message_id = 1;
+  string service_name = 2;
+  string key = 3;
+}
+
+message GetConfigResponse {
+  int32 code = 1;
+  string msg = 2;
+  string config_json = 3;
+}
+
+message ReloadConfigRequest {
+  string message_id = 1;
+  string reason = 2;
+}
+
+message ReloadConfigResponse {
+  int32 code = 1;
+  string msg = 2;
+  string result = 3;
+}
+
+message HealthRequest {
+  string message_id = 1;
+}
+
+message HealthResponse {
+  int32 code = 1;
+  string msg = 2;
+  string status = 3;
+  string detail_json = 4;
+}
+
+service ModelAdminService {
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+  rpc ReloadConfig(ReloadConfigRequest) returns (ReloadConfigResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+}

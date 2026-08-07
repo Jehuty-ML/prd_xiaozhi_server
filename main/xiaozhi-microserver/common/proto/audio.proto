@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package xiaozhi.audio;
+
+// ---- Common envelopes ----
+
+message AudioChunkRequest {
+  string message_id = 1;
+  string client_id = 2;
+  bytes data = 3;
+  string format = 4;  // opus | pcm | raw
+}
+
+message AudioChunkResponse {
+  int32 code = 1;
+  string msg = 2;
+  string result = 3;
+}
+
+message AsrRecognizeRequest {
+  string message_id = 1;
+  string client_id = 2;
+  bytes pcm = 3;
+  int32 sample_rate = 4;
+}
+
+message AsrRecognizeResponse {
+  int32 code = 1;
+  string msg = 2;
+  string text = 3;
+}
+
+message TextRequest {
+  string message_id = 1;
+  string client_id = 2;
+  string text = 3;
+}
+
+message TextResponse {
+  int32 code = 1;
+  string msg = 2;
+  string result = 3;
+}
+
+message SpeakRequest {
+  string message_id = 1;
+  string client_id = 2;
+  string text = 3;
+  string emotion = 4;
+  int32 index = 5;
+  int32 total = 6;
+}
+
+message SpeakResponse {
+  int32 code = 1;
+  string msg = 2;
+  string result = 3;
+}
+
+message TtsAudioRequest {
+  string message_id = 1;
+  string client_id = 2;
+  bytes audio = 3;
+  string text = 4;
+  int32 index = 5;
+  int32 total = 6;
+  string format = 7;  // opus | pcm | wav
+}
+
+message TtsAudioResponse {
+  int32 code = 1;
+  string msg = 2;
+  string result = 3;
+}
+
+// Preprocess: uplink audio from access
+service AudioPreprocessService {
+  rpc SendAudioChunk(AudioChunkRequest) returns (AudioChunkResponse);
+  rpc SendText(TextRequest) returns (TextResponse);
+}
+
+// Receiver: ASR
+service AudioReceiverService {
+  rpc AsrRecognize(AsrRecognizeRequest) returns (AsrRecognizeResponse);
+}
+
+// Agent: dialogue brain
+service AgentService {
+  rpc SendText(TextRequest) returns (TextResponse);
+}
+
+// Speaker: TTS
+service AudioSpeakerService {
+  rpc SpeakText(SpeakRequest) returns (SpeakResponse);
+}
+
+// Access: downstream TTS / device write-back
+service AccessAudioService {
+  rpc SendTtsAudio(TtsAudioRequest) returns (TtsAudioResponse);
+}

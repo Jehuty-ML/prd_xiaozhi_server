@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package xiaozhi.command;
+
+message CommandRequest {
+  string message_id = 1;
+  string client_id = 2;
+  string command = 3;  // listen_start | listen_stop | idle | speak_start | speak_stop
+  string payload = 4;  // optional JSON
+}
+
+message CommandResponse {
+  int32 code = 1;
+  string msg = 2;
+  string result = 3;
+}
+
+message DeviceStateRequest {
+  string message_id = 1;
+  string client_id = 2;
+}
+
+message DeviceStateResponse {
+  int32 code = 1;
+  string msg = 2;
+  string state = 3;
+}
+
+// Access command surface (listen state, device cmds)
+service AccessCommandService {
+  rpc SendCommand(CommandRequest) returns (CommandResponse);
+  rpc GetDeviceState(DeviceStateRequest) returns (DeviceStateResponse);
+}
