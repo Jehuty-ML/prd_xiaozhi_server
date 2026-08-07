@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import time
+import urllib.error
 import urllib.request
 
 sys.path.insert(0, ".")
@@ -122,7 +123,11 @@ async def verify_config():
 def verify_metrics():
     print("=== 7. 线上 /metrics ===")
     errors = []
-    text = fetch("http://127.0.0.1:8003/metrics")
+    try:
+        text = fetch("http://127.0.0.1:8003/metrics")
+    except Exception as e:
+        print(f"  [FAIL] metrics unreachable — {e}")
+        return ["metrics_unreachable"]
     for name in (
         "xiaozhi_ws_active_connections",
         "xiaozhi_circuit_state",
@@ -136,7 +141,12 @@ def verify_metrics():
         print(f"  [{'PASS' if hit else 'FAIL'}] metric {name}")
         if not hit:
             errors.append(name)
-    probe = fetch("http://127.0.0.1:8000/")
+    try:
+        probe = fetch("http://127.0.0.1:8000/")
+    except Exception as e:
+        print(f"  [FAIL] ws probe — {e}")
+        errors.append("ws_probe")
+        return errors
     has_active = "active_connections=" in probe
     print(f"  [{'PASS' if has_active else 'FAIL'}] ws probe water level")
     if not has_active:
@@ -146,10 +156,59 @@ def verify_metrics():
     return errors
 
 
+def verify_health():
+    """探活 /health + /ready（需已部署新版本）。"""
+    import json
+
+    print("=== 8. 线上 /health /ready ===")
+    errors = []
+
+    def check(path: str, expect_status: str | None = None):
+        url = f"http://127.0.0.1:8003{path}"
+        try:
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                code = resp.status
+                body = resp.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as e:
+            code = e.code
+            body = e.read().decode("utf-8", errors="replace") if e.fp else ""
+        except Exception as e:
+            print(f"  [FAIL] {path} unreachable — {e}")
+            errors.append(path)
+            return
+        if code == 404:
+            print(f"  [FAIL] {path} — 404（请重启 xiaozhi-server）")
+            errors.append(path)
+            return
+        try:
+            data = json.loads(body)
+        except json.JSONDecodeError:
+            data = {}
+        ok = code in (200, 503) and isinstance(data, dict) and "status" in data
+        if expect_status and code == 200:
+            ok = ok and data.get("status") == expect_status
+        print(f"  [{'PASS' if ok else 'FAIL'}] {path} HTTP {code} status={data.get('status')}")
+        if not ok:
+            errors.append(path)
+        elif path == "/ready" and code == 200:
+            auth = (data.get("checks") or {}).get("auth") or {}
+            has = "whitelist_bypass" in auth
+            print(
+                f"  [{'PASS' if has else 'FAIL'}] ready.auth checks — {auth}"
+            )
+            if not has:
+                errors.append("ready_auth_checks")
+
+    check("/health", expect_status="ok")
+    check("/ready")
+    return errors
+
+
 async def main():
     e1 = await verify_config()
     e2 = verify_metrics()
-    all_err = e1 + e2
+    e3 = verify_health()
+    all_err = e1 + e2 + e3
     print()
     if all_err:
         print(f"FAILED ({len(all_err)}): {all_err}")

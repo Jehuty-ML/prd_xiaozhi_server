@@ -44,8 +44,13 @@ from core.utils import metrics as metrics_mod
 from core.utils.session_state import resolve_session_mode
 from core.utils.runtime_env import (
     allow_query_authorization,
+    is_device_permitted,
+    normalize_allowed_devices,
     resolve_auth_enabled,
+    resolve_devices_allowlist_only,
     resolve_environment,
+    resolve_whitelist_bypass_allowed,
+    should_bypass_token_for_device,
 )
 
 TAG = __name__
@@ -77,20 +82,27 @@ class WebSocketServer:
 
         auth_config = self.config["server"].get("auth", {}) or {}
         self.auth_enable = resolve_auth_enabled(self.config)
-        # 设备白名单
-        self.allowed_devices = set(auth_config.get("allowed_devices", []))
+        self.allowed_devices = normalize_allowed_devices(
+            auth_config.get("allowed_devices")
+        )
+        self.whitelist_bypass = resolve_whitelist_bypass_allowed(self.config)
+        self.devices_allowlist_only = resolve_devices_allowlist_only(self.config)
         secret_key = self.config["server"]["auth_key"]
         expire_seconds = auth_config.get("expire_seconds", None)
         self.auth = AuthManager(secret_key=secret_key, expire_seconds=expire_seconds)
         self.logger.bind(tag=TAG).info(
             f"连接认证: {'enabled' if self.auth_enable else 'disabled'} "
-            f"(env={self.environment})"
+            f"(env={self.environment}, whitelist_bypass={self.whitelist_bypass}, "
+            f"allowlist_only={self.devices_allowlist_only}, "
+            f"allowed_devices={len(self.allowed_devices)})"
         )
 
         self.connection_limits = ConnectionLimits.from_config(self.config["server"])
         self.connection_registry = ConnectionRegistry(self.connection_limits)
         # 在线 ConnectionHandler，供「通知更新配置」时广播 session_state.mode
         self.active_handlers: set = set()
+        # 由 app.py 注入，热更新时同步 OTA/health 认证策略
+        self.http_server = None
         metrics_mod.set_ws_max_connections(self.connection_limits.max_connections)
         self.logger.bind(tag=TAG).info(
             f"连接硬上限: max={self.connection_limits.max_connections}, "
@@ -263,7 +275,40 @@ class WebSocketServer:
                 # 更新配置
                 self.config = new_config
                 self.environment = resolve_environment(new_config)
-                self.logger.bind(tag=TAG).info(f"运行环境已同步: {self.environment}")
+                auth_config = self.config["server"].get("auth", {}) or {}
+                self.auth_enable = resolve_auth_enabled(self.config)
+                self.allowed_devices = normalize_allowed_devices(
+                    auth_config.get("allowed_devices")
+                )
+                self.whitelist_bypass = resolve_whitelist_bypass_allowed(self.config)
+                self.devices_allowlist_only = resolve_devices_allowlist_only(self.config)
+                secret_key = self.config["server"].get("auth_key", "")
+                expire_seconds = auth_config.get("expire_seconds", None)
+                self.auth = AuthManager(
+                    secret_key=secret_key, expire_seconds=expire_seconds
+                )
+                # OTA/health 仍持有启动时 config；必须同步，否则会下发空 token 或旧白名单
+                http_server = getattr(self, "http_server", None)
+                if http_server is not None and hasattr(http_server, "apply_config"):
+                    try:
+                        http_server.apply_config(self.config)
+                    except Exception as e:
+                        self.logger.bind(tag=TAG).warning(
+                            f"同步 HTTP/OTA 配置失败: {e}"
+                        )
+                else:
+                    # 无 HTTP 引用时至少刷新 readiness 用的全局 config
+                    try:
+                        from core.utils.health import health_state
+
+                        health_state.bind(config=self.config)
+                    except Exception:
+                        pass
+                self.logger.bind(tag=TAG).info(
+                    f"运行环境已同步: {self.environment}; "
+                    f"auth={self.auth_enable}, whitelist_bypass={self.whitelist_bypass}, "
+                    f"allowlist_only={self.devices_allowlist_only}"
+                )
                 # 同步连接硬上限（不影响已建立连接）
                 self.connection_limits = ConnectionLimits.from_config(
                     self.config["server"]
@@ -386,19 +431,22 @@ class WebSocketServer:
             headers = dict(websocket.request.headers)
             device_id = headers.get("device-id", None)
             client_id = headers.get("client-id", None)
-            if self.allowed_devices and device_id in self.allowed_devices:
-                # 如果属于白名单内的设备，不校验token，直接放行
+            if not is_device_permitted(
+                self.config, device_id, self.allowed_devices
+            ):
+                raise AuthenticationError("Device not in allowlist")
+            if should_bypass_token_for_device(
+                self.config, device_id, self.allowed_devices
+            ):
+                # development 默认：白名单免检；production 默认禁止
                 return
+            token = headers.get("authorization", "")
+            if token.startswith("Bearer "):
+                token = token[7:]
             else:
-                # 否则校验token
-                token = headers.get("authorization", "")
-                if token.startswith("Bearer "):
-                    token = token[7:]  # 移除'Bearer '前缀
-                else:
-                    raise AuthenticationError("Missing or invalid Authorization header")
-                # 进行认证
-                auth_success = self.auth.verify_token(
-                    token, client_id=client_id, username=device_id
-                )
-                if not auth_success:
-                    raise AuthenticationError("Invalid token")
+                raise AuthenticationError("Missing or invalid Authorization header")
+            auth_success = self.auth.verify_token(
+                token, client_id=client_id, username=device_id
+            )
+            if not auth_success:
+                raise AuthenticationError("Invalid token")
