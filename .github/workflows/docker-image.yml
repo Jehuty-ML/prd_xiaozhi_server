@@ -13,11 +13,14 @@ on:
 jobs:
   gate:
     name: Release gate (unit tests)
+    # workflow_run 在「完成」时就会触发（含失败）；基座构建失败时不要跑发布门禁/镜像
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     uses: ./.github/workflows/xiaozhi-server-tests.yml
 
   release:
     name: Release Docker images
     needs: gate
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -49,7 +52,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.TOKEN }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract version from tag
         id: get_version

@@ -309,8 +309,15 @@ class TestSpeakDegradationOverload(unittest.TestCase):
 
 class TestAudioRateOverload(unittest.TestCase):
     def test_check_includes_audio_rate_controller(self):
+        import sys
+        from unittest.mock import MagicMock, patch
+
         from core.utils.resilience import check_system_overload, reset_inflight_for_tests
-        from core.utils.audioRateController import AudioRateController
+
+        # audioRateController 模块级 setup_logging() 会读本地/API 配置，单测隔离之
+        sys.modules.pop("core.utils.audioRateController", None)
+        with patch("config.logger.setup_logging", return_value=MagicMock()):
+            from core.utils.audioRateController import AudioRateController
 
         reset_inflight_for_tests()
         rc = AudioRateController(60)
