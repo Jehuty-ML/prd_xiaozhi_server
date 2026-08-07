@@ -63,7 +63,7 @@ class DeviceAutoUpdateTest {
         when(sysParamsService.getValue(Constant.SERVER_MQTT_GATEWAY, true)).thenReturn(null);
 
         DeviceServiceImpl target = new DeviceServiceImpl(
-                null, null, sysParamsService, null, otaService, null) {
+                null, null, sysParamsService, null, otaService, null, null) {
             @Override
             public DeviceEntity getDeviceByMacAddress(String macAddress) {
                 return device;
