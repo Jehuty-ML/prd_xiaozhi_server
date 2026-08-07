@@ -1,0 +1,32 @@
+# 生产叠加配置（仅对话 Server / 无智控台）
+# 由 docker-compose.prod.yml 挂载为 data/.config.yaml，覆盖主线 config.yaml 中同名项
+# 不修改仓库内 config.yaml 的 development 默认
+
+server:
+  environment: production
+  # 部署后改成设备可达地址（公网用 wss/https）
+  # websocket: wss://voice.example.com/xiaozhi/v1/
+  # vision_explain: https://voice.example.com/mcp/vision/explain
+  auth:
+    enabled: true
+    allow_insecure_disable: false
+    allow_whitelist_bypass: false
+    devices_allowlist_only: false
+    allowed_devices: []
+  health:
+    enabled: true
+    liveness_path: /health
+    readiness_path: /ready
+    reject_when_at_capacity: true
+  metrics:
+    enabled: true
+    path: /metrics
+  connection:
+    max_connections: 200
+    max_connections_per_device: 2
+  # 单机无智控台时关闭；多实例请改用 config.overlay.all.yaml
+  registry:
+    enabled: false
+
+# 可选：固定 auth_key（生产建议随机长串；不配则启动时自动生成）
+# server.auth_key: "replace-with-long-random-secret"

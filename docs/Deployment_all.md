@@ -1,7 +1,7 @@
 # 部署架构图
 ![请参考-全模块安装架构图](../docs/images/deploy2.png)
 
-> 生产部署（加固 / 探活 / 容量）：见 [Production.md](./Production.md)
+> 生产部署（开箱 compose / 探活 / 容量）：见 [Production.md](./Production.md)
 
 # 方式一：Docker运行全模块
 `0.8.2`版本开始，本项目发行的docker镜像只支持`x86架构`，如果需要在`arm64架构`的CPU上部署，可按照[这个教程](docker-build.md)在本机编译`arm64的镜像`。

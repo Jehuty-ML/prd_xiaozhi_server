@@ -1,0 +1,30 @@
+# 生产叠加：全模块（Server + 智控台 + MySQL + Redis）
+# 用法：
+#   cp .env.example .env   # 必须设置 MYSQL_ROOT_PASSWORD（勿用 123456）
+#   docker compose -f docker-compose_all.yml -f docker-compose_all.prod.yml up -d
+#
+# 主线 config.yaml 不动；生产项由 deploy/production/config.overlay.all.yaml 覆盖
+
+services:
+  xiaozhi-esp32-server:
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - XIAOZHI_ENV=production
+    volumes:
+      - ./data:/opt/xiaozhi-esp32-server/data
+      - ./deploy/production/config.overlay.all.yaml:/opt/xiaozhi-esp32-server/data/.config.yaml:ro
+      - ./models/SenseVoiceSmall/model.pt:/opt/xiaozhi-esp32-server/models/SenseVoiceSmall/model.pt
+
+  xiaozhi-esp32-server-web:
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      # 全模块生产同样要求强密码（继承 all 中的 ? 校验）
+      - SPRING_DATASOURCE_DRUID_PASSWORD=${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+
+  xiaozhi-esp32-server-db:
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+
+  xiaozhi-esp32-server-redis:
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}

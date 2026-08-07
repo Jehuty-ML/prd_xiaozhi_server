@@ -1,7 +1,7 @@
 # 部署架构图
 ![请参考-最简化架构图](../docs/images/deploy1.png)
 
-> 生产部署（加固 / 探活 / 容量）：见 [Production.md](./Production.md)
+> 生产部署（开箱 compose / 探活 / 容量）：见 [Production.md](./Production.md)
 
 # 方式一：Docker只运行Server
 
