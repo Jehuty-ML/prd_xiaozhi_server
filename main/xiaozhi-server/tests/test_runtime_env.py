@@ -87,6 +87,7 @@ class TestWhitelistPolicy(unittest.TestCase):
         """热更新后 OTA 必须跟上 auth / 白名单，不能沿用启动缓存。"""
         import sys
         import types
+        from unittest.mock import MagicMock, patch
 
         # ota_handler → util 依赖 opus；注入轻量假模块
         fake_util = types.ModuleType("core.utils.util")
@@ -94,48 +95,52 @@ class TestWhitelistPolicy(unittest.TestCase):
         fake_util.get_vision_url = lambda _cfg: "http://127.0.0.1/vision"
         prev_util = sys.modules.get("core.utils.util")
         sys.modules["core.utils.util"] = fake_util
-        # 清掉可能半加载的 ota_handler
+        # 清掉可能半加载的 ota_handler / base_handler
         sys.modules.pop("core.api.ota_handler", None)
+        sys.modules.pop("core.api.base_handler", None)
         try:
-            from core.api.ota_handler import OTAHandler
+            # BaseHandler.__init__ → setup_logging() 会读本地/API 配置，单测隔离之
+            with patch("config.logger.setup_logging", return_value=MagicMock()):
+                from core.api.ota_handler import OTAHandler
 
-            cfg1 = {
-                "server": {
-                    "environment": "development",
-                    "auth_key": "k" * 32,
-                    "auth": {
-                        "enabled": False,
-                        "allowed_devices": [],
-                        "allow_whitelist_bypass": "auto",
-                        "devices_allowlist_only": False,
-                    },
+                cfg1 = {
+                    "server": {
+                        "environment": "development",
+                        "auth_key": "k" * 32,
+                        "auth": {
+                            "enabled": False,
+                            "allowed_devices": [],
+                            "allow_whitelist_bypass": "auto",
+                            "devices_allowlist_only": False,
+                        },
+                    }
                 }
-            }
-            handler = OTAHandler(cfg1)
-            self.assertFalse(handler.auth_enable)
+                handler = OTAHandler(cfg1)
+                self.assertFalse(handler.auth_enable)
 
-            cfg2 = {
-                "server": {
-                    "environment": "production",
-                    "auth_key": "k" * 32,
-                    "auth": {
-                        "enabled": True,
-                        "allowed_devices": ["aa:bb"],
-                        "allow_whitelist_bypass": "auto",
-                        "devices_allowlist_only": True,
-                    },
+                cfg2 = {
+                    "server": {
+                        "environment": "production",
+                        "auth_key": "k" * 32,
+                        "auth": {
+                            "enabled": True,
+                            "allowed_devices": ["aa:bb"],
+                            "allow_whitelist_bypass": "auto",
+                            "devices_allowlist_only": True,
+                        },
+                    }
                 }
-            }
-            handler.apply_config(cfg2)
-            self.assertTrue(handler.auth_enable)
-            self.assertEqual(handler.allowed_devices, {"aa:bb"})
-            self.assertTrue(handler.devices_allowlist_only)
-            self.assertFalse(handler.whitelist_bypass)
-            self.assertFalse(
-                is_device_permitted(cfg2, "cc:dd", handler.allowed_devices)
-            )
+                handler.apply_config(cfg2)
+                self.assertTrue(handler.auth_enable)
+                self.assertEqual(handler.allowed_devices, {"aa:bb"})
+                self.assertTrue(handler.devices_allowlist_only)
+                self.assertFalse(handler.whitelist_bypass)
+                self.assertFalse(
+                    is_device_permitted(cfg2, "cc:dd", handler.allowed_devices)
+                )
         finally:
             sys.modules.pop("core.api.ota_handler", None)
+            sys.modules.pop("core.api.base_handler", None)
             if prev_util is None:
                 sys.modules.pop("core.utils.util", None)
             else:

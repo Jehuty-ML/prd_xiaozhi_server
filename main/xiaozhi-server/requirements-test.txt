@@ -1,3 +1,5 @@
-# 网关门禁单测最小依赖（不含 torch / funasr）
+# Minimal deps for gateway unit-test gate (no torch / funasr)
 loguru==0.7.3
 prometheus_client==0.21.1
+PyYAML==6.0.2
+aiohttp==3.13.2
