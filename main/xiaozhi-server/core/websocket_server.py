@@ -258,6 +258,8 @@ class WebSocketServer:
                 self.logger.bind(tag=TAG).info(
                     f"检查VAD和ASR类型是否需要更新: {update_vad} {update_asr}"
                 )
+                # mode 变化才打断在线会话；无关配置刷新不得 barge-in
+                old_mode = resolve_session_mode(self.config)
                 # 更新配置
                 self.config = new_config
                 self.environment = resolve_environment(new_config)
@@ -293,9 +295,14 @@ class WebSocketServer:
                     self._intent = modules["intent"]
                 if "memory" in modules:
                     self._memory = modules["memory"]
-                # 全局 mode：向本实例全部在线连接广播并强制打断回 IDLE
+                # 仅当全局 session_state.mode 变化时广播并强制打断回 IDLE
                 new_mode = resolve_session_mode(self.config)
-                await self._apply_session_mode_to_handlers(new_mode)
+                if new_mode != old_mode:
+                    await self._apply_session_mode_to_handlers(new_mode)
+                else:
+                    self.logger.bind(tag=TAG).info(
+                        f"session_state.mode 未变化 ({new_mode})，跳过在线打断"
+                    )
                 self.logger.bind(tag=TAG).info(f"更新配置任务执行完毕")
                 return True
         except Exception as e:

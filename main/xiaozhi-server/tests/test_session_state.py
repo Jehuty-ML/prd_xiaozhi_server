@@ -20,6 +20,7 @@ from core.utils.session_state import (
     enter_detect,
     is_play_only_mode,
     resolve_session_mode,
+    speak_broadcast_text,
     sync_legacy_flags,
     transition_session,
 )
@@ -406,6 +407,25 @@ class SessionConnectionWiringTests(unittest.IsolatedAsyncioTestCase):
             PLAY_ONLY_SESSION_MODE,
         )
 
+    async def test_apply_session_mode_same_mode_does_not_interrupt(self):
+        """同 mode 热更新不得打断进行中的对话。"""
+        transition_session(self.conn, SessionEvent.CHAT_START)
+        transition_session(self.conn, SessionEvent.TTS_START)
+        self.assertEqual(self.conn.session_sm.state, SessionState.SPEAKING)
+
+        self.conn.websocket = object()
+        self.conn._closed = False
+        cleared = {"n": 0}
+        self.conn.clear_queues = lambda: cleared.__setitem__("n", cleared["n"] + 1)
+
+        ok = await apply_session_mode(
+            self.conn, DEFAULT_SESSION_MODE, force_interrupt=True
+        )
+        self.assertTrue(ok)
+        self.assertEqual(cleared["n"], 0)
+        self.assertEqual(self.conn.session_sm.mode, DEFAULT_SESSION_MODE)
+        self.assertEqual(self.conn.session_sm.state, SessionState.SPEAKING)
+        self.assertTrue(self.conn.client_is_speaking)
     async def test_broadcast_speak_auto_play_only_then_restore_common(self):
         """广播会话：play_only 期间禁对话，clear_speak 后回 common。"""
         self.conn.websocket = object()
@@ -439,6 +459,68 @@ class SessionConnectionWiringTests(unittest.IsolatedAsyncioTestCase):
             self.conn.config.get("session_state", {}).get("mode"),
             DEFAULT_SESSION_MODE,
         )
+
+    async def test_broadcast_speak_preserves_permanent_play_only(self):
+        """永久 play_only 下广播播完后不得被恢复成 common。"""
+        self.conn.websocket = object()
+        self.conn._closed = False
+        self.conn.clear_queues = lambda: None
+        self.conn.config = {"session_state": {"mode": PLAY_ONLY_SESSION_MODE}}
+        self.conn.session_sm.switch_mode(PLAY_ONLY_SESSION_MODE, reset_to_idle=True)
+
+        self.conn._broadcast_speak_active = True
+        self.conn._broadcast_restore_mode = PLAY_ONLY_SESSION_MODE
+        self.assertTrue(
+            transition_session(
+                self.conn, SessionEvent.TTS_START, detail="broadcast_speak"
+            )
+        )
+        clear_speak_status(self.conn)
+        self.assertFalse(getattr(self.conn, "_broadcast_speak_active", False))
+        self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
+        self.assertEqual(self.conn.session_sm.state, SessionState.IDLE)
+        self.assertEqual(
+            self.conn.config.get("session_state", {}).get("mode"),
+            PLAY_ONLY_SESSION_MODE,
+        )
+
+    async def test_speak_broadcast_text_saves_prior_mode(self):
+        """speak_broadcast_text 应把恢复 mode 记为切换前的值。"""
+        self.conn.websocket = object()
+        self.conn._closed = False
+        self.conn.clear_queues = lambda: None
+        self.conn.config = {"session_state": {"mode": PLAY_ONLY_SESSION_MODE}}
+        self.conn.session_sm.switch_mode(PLAY_ONLY_SESSION_MODE, reset_to_idle=True)
+        self.conn.tts = object()
+
+        spoken = {"text": None}
+
+        def _fake_speak(conn, text):
+            spoken["text"] = text
+
+        import sys
+        import types
+
+        fake_intent = types.ModuleType("core.handle.intentHandler")
+        fake_intent.speak_txt = _fake_speak
+        # speak_broadcast_text 延迟 import；注入轻量假模块避免拉 opus 依赖
+        prev = sys.modules.get("core.handle.intentHandler")
+        sys.modules["core.handle.intentHandler"] = fake_intent
+        try:
+            ok = await speak_broadcast_text(self.conn, "全体注意")
+            self.assertTrue(ok)
+            self.assertEqual(
+                self.conn._broadcast_restore_mode, PLAY_ONLY_SESSION_MODE
+            )
+            self.assertTrue(self.conn._broadcast_speak_active)
+            self.assertEqual(spoken["text"], "全体注意")
+            self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
+            self.assertEqual(self.conn.session_sm.state, SessionState.SPEAKING)
+        finally:
+            if prev is None:
+                sys.modules.pop("core.handle.intentHandler", None)
+            else:
+                sys.modules["core.handle.intentHandler"] = prev
 
 
 if __name__ == "__main__":
