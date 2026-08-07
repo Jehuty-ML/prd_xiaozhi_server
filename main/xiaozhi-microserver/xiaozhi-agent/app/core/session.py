@@ -71,15 +71,14 @@ class Session:
         self.dialogue.update_system_message(prompt)
 
     def speak(self, text: str, *, emotion: str = "neutral", index: int = 0, total: int = 0) -> None:
-        """Enqueue one TTS sentence via audio-speaker (still stub TTS in phase 3)."""
+        """Enqueue one TTS sentence via audio-speaker."""
         text = (text or "").strip()
         if not text:
             return
         if index <= 0:
             self._speak_index += 1
             index = self._speak_index
-        if total <= 0:
-            total = index
+        # total<=0 means non-final; speaker waits for speak_end()
         message_id = self.sentence_id or uuid.uuid4().hex
         stub = audio_pb2_grpc.AudioSpeakerServiceStub(self.pool.channel(SPEAKER_SERVICE))
         stub.SpeakText(
@@ -89,12 +88,33 @@ class Session:
                 text=text,
                 emotion=emotion,
                 index=index,
-                total=total,
+                total=total if total > 0 else 0,
+                end=False,
             ),
             metadata=self.pool.metadata(self.client_id, message_id),
             timeout=30,
         )
         logger.debug(f"Session.speak client={self.client_id} idx={index} text={text!r}")
+
+    def speak_end(self) -> None:
+        """Signal end of current speak turn (TTS state=stop after drain)."""
+        message_id = self.sentence_id or uuid.uuid4().hex
+        index = self._speak_index or 1
+        stub = audio_pb2_grpc.AudioSpeakerServiceStub(self.pool.channel(SPEAKER_SERVICE))
+        stub.SpeakText(
+            audio_pb2.SpeakRequest(
+                message_id=message_id,
+                client_id=self.client_id,
+                text="",
+                emotion="neutral",
+                index=index,
+                total=index,
+                end=True,
+            ),
+            metadata=self.pool.metadata(self.client_id, message_id),
+            timeout=10,
+        )
+        logger.debug(f"Session.speak_end client={self.client_id} idx={index}")
 
     def send_device_json(self, payload: dict[str, Any]) -> bool:
         """Proxy a JSON frame to the device WebSocket via access."""

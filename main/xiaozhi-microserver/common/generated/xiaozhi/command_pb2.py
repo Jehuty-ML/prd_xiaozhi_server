@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rcommand.proto\x12\x0fxiaozhi.command\"Y\n\x0e\x43ommandRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0f\n\x07\x63ommand\x18\x03 \x01(\t\x12\x0f\n\x07payload\x18\x04 \x01(\t\"<\n\x0f\x43ommandResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\";\n\x12\x44\x65viceStateRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\"?\n\x13\x44\x65viceStateResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\r\n\x05state\x18\x03 \x01(\t\",\n\x16\x43onnectionStatsRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\"\x99\x01\n\x17\x43onnectionStatsResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06\x61\x63tive\x18\x03 \x01(\x05\x12\x17\n\x0fmax_connections\x18\x04 \x01(\x05\x12\"\n\x1amax_connections_per_device\x18\x05 \x01(\x05\x12\x16\n\x0erejected_total\x18\x06 \x01(\x05\"P\n\x14\x44\x65viceMessageRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x11\n\tjson_text\x18\x03 \x01(\t\"B\n\x15\x44\x65viceMessageResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t2\xae\x02\n\x14\x41\x63\x63\x65ssCommandService\x12P\n\x0bSendCommand\x12\x1f.xiaozhi.command.CommandRequest\x1a .xiaozhi.command.CommandResponse\x12[\n\x0eGetDeviceState\x12#.xiaozhi.command.DeviceStateRequest\x1a$.xiaozhi.command.DeviceStateResponse\x12g\n\x12GetConnectionStats\x12\'.xiaozhi.command.ConnectionStatsRequest\x1a(.xiaozhi.command.ConnectionStatsResponse2y\n\x18\x41\x63\x63\x65ssDeviceProxyService\x12]\n\x0cSendToDevice\x12%.xiaozhi.command.DeviceMessageRequest\x1a&.xiaozhi.command.DeviceMessageResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rcommand.proto\x12\x0fxiaozhi.command\"Y\n\x0e\x43ommandRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0f\n\x07\x63ommand\x18\x03 \x01(\t\x12\x0f\n\x07payload\x18\x04 \x01(\t\"<\n\x0f\x43ommandResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\";\n\x12\x44\x65viceStateRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\"?\n\x13\x44\x65viceStateResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\r\n\x05state\x18\x03 \x01(\t\",\n\x16\x43onnectionStatsRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\"\x99\x01\n\x17\x43onnectionStatsResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06\x61\x63tive\x18\x03 \x01(\x05\x12\x17\n\x0fmax_connections\x18\x04 \x01(\x05\x12\"\n\x1amax_connections_per_device\x18\x05 \x01(\x05\x12\x16\n\x0erejected_total\x18\x06 \x01(\x05\"(\n\x12ListClientsRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\"D\n\x13ListClientsResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x12\n\nclient_ids\x18\x03 \x03(\t\"P\n\x14\x44\x65viceMessageRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x11\n\tjson_text\x18\x03 \x01(\t\"B\n\x15\x44\x65viceMessageResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t2\x88\x03\n\x14\x41\x63\x63\x65ssCommandService\x12P\n\x0bSendCommand\x12\x1f.xiaozhi.command.CommandRequest\x1a .xiaozhi.command.CommandResponse\x12[\n\x0eGetDeviceState\x12#.xiaozhi.command.DeviceStateRequest\x1a$.xiaozhi.command.DeviceStateResponse\x12g\n\x12GetConnectionStats\x12\'.xiaozhi.command.ConnectionStatsRequest\x1a(.xiaozhi.command.ConnectionStatsResponse\x12X\n\x0bListClients\x12#.xiaozhi.command.ListClientsRequest\x1a$.xiaozhi.command.ListClientsResponse2y\n\x18\x41\x63\x63\x65ssDeviceProxyService\x12]\n\x0cSendToDevice\x12%.xiaozhi.command.DeviceMessageRequest\x1a&.xiaozhi.command.DeviceMessageResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -43,12 +43,16 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_CONNECTIONSTATSREQUEST']._serialized_end=357
   _globals['_CONNECTIONSTATSRESPONSE']._serialized_start=360
   _globals['_CONNECTIONSTATSRESPONSE']._serialized_end=513
-  _globals['_DEVICEMESSAGEREQUEST']._serialized_start=515
-  _globals['_DEVICEMESSAGEREQUEST']._serialized_end=595
-  _globals['_DEVICEMESSAGERESPONSE']._serialized_start=597
-  _globals['_DEVICEMESSAGERESPONSE']._serialized_end=663
-  _globals['_ACCESSCOMMANDSERVICE']._serialized_start=666
-  _globals['_ACCESSCOMMANDSERVICE']._serialized_end=968
-  _globals['_ACCESSDEVICEPROXYSERVICE']._serialized_start=970
-  _globals['_ACCESSDEVICEPROXYSERVICE']._serialized_end=1091
+  _globals['_LISTCLIENTSREQUEST']._serialized_start=515
+  _globals['_LISTCLIENTSREQUEST']._serialized_end=555
+  _globals['_LISTCLIENTSRESPONSE']._serialized_start=557
+  _globals['_LISTCLIENTSRESPONSE']._serialized_end=625
+  _globals['_DEVICEMESSAGEREQUEST']._serialized_start=627
+  _globals['_DEVICEMESSAGEREQUEST']._serialized_end=707
+  _globals['_DEVICEMESSAGERESPONSE']._serialized_start=709
+  _globals['_DEVICEMESSAGERESPONSE']._serialized_end=775
+  _globals['_ACCESSCOMMANDSERVICE']._serialized_start=778
+  _globals['_ACCESSCOMMANDSERVICE']._serialized_end=1170
+  _globals['_ACCESSDEVICEPROXYSERVICE']._serialized_start=1172
+  _globals['_ACCESSDEVICEPROXYSERVICE']._serialized_end=1293
 # @@protoc_insertion_point(module_scope)

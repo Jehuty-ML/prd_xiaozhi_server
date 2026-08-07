@@ -9,14 +9,31 @@ import pytest
 
 AGENT_ROOT = Path(__file__).resolve().parents[1] / "xiaozhi-agent"
 MICRO_ROOT = Path(__file__).resolve().parents[1]
-for p in (
-    MICRO_ROOT / "common",
-    MICRO_ROOT / "common" / "generated",
-    AGENT_ROOT,
-):
-    s = str(p)
-    if s not in sys.path:
+
+
+def _use_agent_app() -> None:
+    for key in list(sys.modules):
+        if key == "app" or key.startswith("app."):
+            del sys.modules[key]
+    paths = [
+        str(AGENT_ROOT),
+        str(MICRO_ROOT / "common"),
+        str(MICRO_ROOT / "common" / "generated"),
+    ]
+    for s in paths:
+        if s in sys.path:
+            sys.path.remove(s)
+    for s in reversed(paths):
         sys.path.insert(0, s)
+
+
+_use_agent_app()
+
+
+@pytest.fixture(autouse=True)
+def _agent_path():
+    _use_agent_app()
+    yield
 
 
 class _FakePool:
@@ -48,6 +65,7 @@ def session(agent_cfg):
         intent_type="function_call",
     )
     sess.speak = lambda text, emotion="neutral", index=0, total=0: spoken.append(text)
+    sess.speak_end = lambda: None  # type: ignore[method-assign]
     sess._spoken = spoken  # type: ignore[attr-defined]
     return sess
 

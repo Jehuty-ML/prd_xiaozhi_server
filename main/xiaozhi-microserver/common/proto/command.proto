@@ -39,11 +39,22 @@ message ConnectionStatsResponse {
   int32 rejected_total = 6;
 }
 
+message ListClientsRequest {
+  string message_id = 1;
+}
+
+message ListClientsResponse {
+  int32 code = 1;
+  string msg = 2;
+  repeated string client_ids = 3;
+}
+
 // Access command surface (listen state, device cmds, capacity)
 service AccessCommandService {
   rpc SendCommand(CommandRequest) returns (CommandResponse);
   rpc GetDeviceState(DeviceStateRequest) returns (DeviceStateResponse);
   rpc GetConnectionStats(ConnectionStatsRequest) returns (ConnectionStatsResponse);
+  rpc ListClients(ListClientsRequest) returns (ListClientsResponse);
 }
 
 message DeviceMessageRequest {

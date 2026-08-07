@@ -380,7 +380,7 @@ class AgentService:
 
 
 class AudioSpeakerServiceStub:
-    """Speaker: TTS
+    """Speaker: TTS (phase-4)
     """
 
     def __init__(self, channel):
@@ -394,13 +394,35 @@ class AudioSpeakerServiceStub:
                 request_serializer=audio__pb2.SpeakRequest.SerializeToString,
                 response_deserializer=audio__pb2.SpeakResponse.FromString,
                 _registered_method=True)
+        self.Abort = channel.unary_unary(
+                '/xiaozhi.audio.AudioSpeakerService/Abort',
+                request_serializer=audio__pb2.SpeakerAbortRequest.SerializeToString,
+                response_deserializer=audio__pb2.SpeakerAbortResponse.FromString,
+                _registered_method=True)
+        self.BroadcastSpeak = channel.unary_unary(
+                '/xiaozhi.audio.AudioSpeakerService/BroadcastSpeak',
+                request_serializer=audio__pb2.BroadcastSpeakRequest.SerializeToString,
+                response_deserializer=audio__pb2.BroadcastSpeakResponse.FromString,
+                _registered_method=True)
 
 
 class AudioSpeakerServiceServicer:
-    """Speaker: TTS
+    """Speaker: TTS (phase-4)
     """
 
     def SpeakText(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Abort(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def BroadcastSpeak(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -414,6 +436,16 @@ def add_AudioSpeakerServiceServicer_to_server(servicer, server):
                     request_deserializer=audio__pb2.SpeakRequest.FromString,
                     response_serializer=audio__pb2.SpeakResponse.SerializeToString,
             ),
+            'Abort': grpc.unary_unary_rpc_method_handler(
+                    servicer.Abort,
+                    request_deserializer=audio__pb2.SpeakerAbortRequest.FromString,
+                    response_serializer=audio__pb2.SpeakerAbortResponse.SerializeToString,
+            ),
+            'BroadcastSpeak': grpc.unary_unary_rpc_method_handler(
+                    servicer.BroadcastSpeak,
+                    request_deserializer=audio__pb2.BroadcastSpeakRequest.FromString,
+                    response_serializer=audio__pb2.BroadcastSpeakResponse.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'xiaozhi.audio.AudioSpeakerService', rpc_method_handlers)
@@ -423,7 +455,7 @@ def add_AudioSpeakerServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class AudioSpeakerService:
-    """Speaker: TTS
+    """Speaker: TTS (phase-4)
     """
 
     @staticmethod
@@ -443,6 +475,60 @@ class AudioSpeakerService:
             '/xiaozhi.audio.AudioSpeakerService/SpeakText',
             audio__pb2.SpeakRequest.SerializeToString,
             audio__pb2.SpeakResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Abort(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/xiaozhi.audio.AudioSpeakerService/Abort',
+            audio__pb2.SpeakerAbortRequest.SerializeToString,
+            audio__pb2.SpeakerAbortResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def BroadcastSpeak(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/xiaozhi.audio.AudioSpeakerService/BroadcastSpeak',
+            audio__pb2.BroadcastSpeakRequest.SerializeToString,
+            audio__pb2.BroadcastSpeakResponse.FromString,
             options,
             channel_credentials,
             insecure,

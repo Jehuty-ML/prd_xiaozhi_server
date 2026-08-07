@@ -1,0 +1,25 @@
+server:
+  name: xiaozhi-audio-speaker
+  phase: 4
+  environment: development
+
+selected_module:
+  TTS: EchoTTS
+
+TTS:
+  EchoTTS:
+    type: echo
+    sample_rate: 16000
+    frame_duration_ms: 60
+  EdgeTTS:
+    type: edge
+    voice: zh-CN-XiaoxiaoNeural
+    format: mp3
+    volume: 50
+    rate: 0
+    pitch: 0
+    output_dir: tmp/
+    sample_rate: 16000
+    frame_duration_ms: 60
+
+frame_duration_ms: 60

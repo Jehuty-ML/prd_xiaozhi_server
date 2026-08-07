@@ -163,6 +163,8 @@ class ChatEngine:
             fallback = "抱歉，我这边刚才走神了，请再说一次。"
             speaker.feed(fallback)
             speaker.flush()
+            if not session.client_abort:
+                session.speak_end()
             session.dialogue.put(Message(role="assistant", content=fallback))
             return fallback
 
@@ -212,6 +214,8 @@ class ChatEngine:
             )
 
         speaker.flush()
+        if not session.client_abort:
+            session.speak_end()
         text = speaker.full_text or "".join(response_chunks)
         if text:
             session.dialogue.put(Message(role="assistant", content=text))
@@ -271,6 +275,8 @@ class ChatEngine:
 
         if direct_parts and not need_llm:
             speaker.flush()
+            if not session.client_abort:
+                session.speak_end()
             text = "".join(direct_parts)
             session.dialogue.put(Message(role="assistant", content=text))
             return text
@@ -279,4 +285,6 @@ class ChatEngine:
             return self.chat(session, query=None, depth=depth + 1)
 
         speaker.flush()
+        if not session.client_abort:
+            session.speak_end()
         return speaker.full_text or ""

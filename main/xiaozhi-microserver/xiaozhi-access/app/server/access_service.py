@@ -22,24 +22,44 @@ class AccessAudioServicer(audio_pb2_grpc.AccessAudioServiceServicer):
         client_id = request.client_id or getattr(context, "client_id", "")
         audio = request.audio or b""
         text = request.text or ""
-        logger.info(
-            f"Access TTS downlink client_id={client_id} bytes={len(audio)} text={text!r}"
-        )
-        ok_bin = connection_manager.send_bytes_threadsafe(client_id, audio)
+        state = (request.state or "").strip()
         meta = connection_manager.get_meta(client_id)
-        frame = json.dumps(
-            {
+        session_id = request.session_id or meta.get("session_id", "")
+        ok_bin = False
+        ok_txt = False
+
+        # Device-compatible TTS state frames (start / sentence_start / stop)
+        if state:
+            frame: dict = {
                 "type": "tts",
-                "text": text,
-                "index": request.index,
-                "total": request.total,
-                "format": request.format or "stub",
-                "audio_bytes": len(audio),
-                "session_id": meta.get("session_id", ""),
-            },
-            ensure_ascii=False,
-        )
-        ok_txt = connection_manager.send_text_threadsafe(client_id, frame)
+                "state": state,
+                "session_id": session_id,
+            }
+            if text:
+                frame["text"] = text
+            if request.index:
+                frame["index"] = request.index
+            if request.total:
+                frame["total"] = request.total
+            ok_txt = connection_manager.send_text_threadsafe(
+                client_id, json.dumps(frame, ensure_ascii=False)
+            )
+            if state in ("start", "sentence_start"):
+                connection_manager.set_state(client_id, "speaking")
+            elif state == "stop":
+                connection_manager.set_state(client_id, "idle")
+            logger.info(
+                f"Access TTS state={state} client_id={client_id} text={text!r}"
+            )
+
+        # Binary Opus (or other) frames
+        if audio:
+            ok_bin = connection_manager.send_bytes_threadsafe(client_id, audio)
+            logger.debug(
+                f"Access TTS audio client_id={client_id} bytes={len(audio)} "
+                f"format={request.format or 'opus'}"
+            )
+
         if not (ok_bin or ok_txt):
             return audio_pb2.TtsAudioResponse(
                 code=1, msg="client not connected", result=""
@@ -79,6 +99,13 @@ class AccessCommandServicer(command_pb2_grpc.AccessCommandServiceServicer):
             max_connections=reg.limits.max_connections,
             max_connections_per_device=reg.limits.max_connections_per_device,
             rejected_total=reg.rejected_total,
+        )
+
+    def ListClients(self, request, context):  # noqa: N802, ANN001
+        return command_pb2.ListClientsResponse(
+            code=0,
+            msg="ok",
+            client_ids=connection_manager.list_client_ids(),
         )
 
 

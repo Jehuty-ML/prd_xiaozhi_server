@@ -12,6 +12,7 @@ from xiaozhi_common.constants import (
     DEFAULT_PORTS,
     MODEL_ADMIN_HTTP_PORT,
     MODEL_ADMIN_SERVICE,
+    SPEAKER_SERVICE,
 )
 from xiaozhi_common.grpc.client import GrpcClientPool
 from xiaozhi_common.grpc.server import start_grpc_server
@@ -39,6 +40,7 @@ def serve(config: BaseServerConfig) -> None:
 
     resolver = ServiceResolver(config, nacos)
     resolver.watch(ACCESS_SERVICE)
+    resolver.watch(SPEAKER_SERVICE)
     pool = GrpcClientPool(resolver)
 
     store = ConfigStore(pool=pool)

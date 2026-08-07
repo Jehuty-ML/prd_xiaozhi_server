@@ -14,3 +14,7 @@ cryptography>=42.0.0
 prometheus-client>=0.20.0
 openai>=1.40.0
 pytest>=8.0.0
+numpy>=1.26.0
+opuslib_next>=1.1.5
+pydub>=0.25.1
+edge-tts>=6.1.0

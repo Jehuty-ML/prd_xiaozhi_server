@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0b\x61udio.proto\x12\rxiaozhi.audio\"X\n\x11\x41udioChunkRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0c\n\x04\x64\x61ta\x18\x03 \x01(\x0c\x12\x0e\n\x06\x66ormat\x18\x04 \x01(\t\"?\n\x12\x41udioChunkResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\"^\n\x13\x41srRecognizeRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0b\n\x03pcm\x18\x03 \x01(\x0c\x12\x13\n\x0bsample_rate\x18\x04 \x01(\x05\"?\n\x14\x41srRecognizeResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\"B\n\x0bTextRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\"9\n\x0cTextResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\"r\n\x0cSpeakRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\x12\x0f\n\x07\x65motion\x18\x04 \x01(\t\x12\r\n\x05index\x18\x05 \x01(\x05\x12\r\n\x05total\x18\x06 \x01(\x05\":\n\rSpeakResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\"\x83\x01\n\x0fTtsAudioRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\r\n\x05\x61udio\x18\x03 \x01(\x0c\x12\x0c\n\x04text\x18\x04 \x01(\t\x12\r\n\x05index\x18\x05 \x01(\x05\x12\r\n\x05total\x18\x06 \x01(\x05\x12\x0e\n\x06\x66ormat\x18\x07 \x01(\t\"=\n\x10TtsAudioResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\"e\n\x12\x44\x65viceEventRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x12\n\nevent_type\x18\x03 \x01(\t\x12\x14\n\x0cpayload_json\x18\x04 \x01(\t\"@\n\x13\x44\x65viceEventResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\"J\n\x11\x41gentAbortRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0e\n\x06reason\x18\x03 \x01(\t\"?\n\x12\x41gentAbortResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t2\xb4\x01\n\x16\x41udioPreprocessService\x12U\n\x0eSendAudioChunk\x12 .xiaozhi.audio.AudioChunkRequest\x1a!.xiaozhi.audio.AudioChunkResponse\x12\x43\n\x08SendText\x12\x1a.xiaozhi.audio.TextRequest\x1a\x1b.xiaozhi.audio.TextResponse2o\n\x14\x41udioReceiverService\x12W\n\x0c\x41srRecognize\x12\".xiaozhi.audio.AsrRecognizeRequest\x1a#.xiaozhi.audio.AsrRecognizeResponse2\xfd\x01\n\x0c\x41gentService\x12\x43\n\x08SendText\x12\x1a.xiaozhi.audio.TextRequest\x1a\x1b.xiaozhi.audio.TextResponse\x12Z\n\x11HandleDeviceEvent\x12!.xiaozhi.audio.DeviceEventRequest\x1a\".xiaozhi.audio.DeviceEventResponse\x12L\n\x05\x41\x62ort\x12 .xiaozhi.audio.AgentAbortRequest\x1a!.xiaozhi.audio.AgentAbortResponse2]\n\x13\x41udioSpeakerService\x12\x46\n\tSpeakText\x12\x1b.xiaozhi.audio.SpeakRequest\x1a\x1c.xiaozhi.audio.SpeakResponse2e\n\x12\x41\x63\x63\x65ssAudioService\x12O\n\x0cSendTtsAudio\x12\x1e.xiaozhi.audio.TtsAudioRequest\x1a\x1f.xiaozhi.audio.TtsAudioResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0b\x61udio.proto\x12\rxiaozhi.audio\"X\n\x11\x41udioChunkRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0c\n\x04\x64\x61ta\x18\x03 \x01(\x0c\x12\x0e\n\x06\x66ormat\x18\x04 \x01(\t\"?\n\x12\x41udioChunkResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\"^\n\x13\x41srRecognizeRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0b\n\x03pcm\x18\x03 \x01(\x0c\x12\x13\n\x0bsample_rate\x18\x04 \x01(\x05\"?\n\x14\x41srRecognizeResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\"B\n\x0bTextRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\"9\n\x0cTextResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\"\x7f\n\x0cSpeakRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\x12\x0f\n\x07\x65motion\x18\x04 \x01(\t\x12\r\n\x05index\x18\x05 \x01(\x05\x12\r\n\x05total\x18\x06 \x01(\x05\x12\x0b\n\x03\x65nd\x18\x07 \x01(\x08\":\n\rSpeakResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\"\xa6\x01\n\x0fTtsAudioRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\r\n\x05\x61udio\x18\x03 \x01(\x0c\x12\x0c\n\x04text\x18\x04 \x01(\t\x12\r\n\x05index\x18\x05 \x01(\x05\x12\r\n\x05total\x18\x06 \x01(\x05\x12\x0e\n\x06\x66ormat\x18\x07 \x01(\t\x12\r\n\x05state\x18\x08 \x01(\t\x12\x12\n\nsession_id\x18\t \x01(\t\"=\n\x10TtsAudioResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\"e\n\x12\x44\x65viceEventRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x12\n\nevent_type\x18\x03 \x01(\t\x12\x14\n\x0cpayload_json\x18\x04 \x01(\t\"@\n\x13\x44\x65viceEventResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\"J\n\x11\x41gentAbortRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0e\n\x06reason\x18\x03 \x01(\t\"?\n\x12\x41gentAbortResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\"L\n\x13SpeakerAbortRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0e\n\x06reason\x18\x03 \x01(\t\"A\n\x14SpeakerAbortResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\"T\n\x15\x42roadcastSpeakRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x0c\n\x04text\x18\x02 \x01(\t\x12\x19\n\x11\x65xclude_client_id\x18\x03 \x01(\t\"S\n\x16\x42roadcastSpeakResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\x12\x0e\n\x06spoken\x18\x04 \x01(\x05\x32\xb4\x01\n\x16\x41udioPreprocessService\x12U\n\x0eSendAudioChunk\x12 .xiaozhi.audio.AudioChunkRequest\x1a!.xiaozhi.audio.AudioChunkResponse\x12\x43\n\x08SendText\x12\x1a.xiaozhi.audio.TextRequest\x1a\x1b.xiaozhi.audio.TextResponse2o\n\x14\x41udioReceiverService\x12W\n\x0c\x41srRecognize\x12\".xiaozhi.audio.AsrRecognizeRequest\x1a#.xiaozhi.audio.AsrRecognizeResponse2\xfd\x01\n\x0c\x41gentService\x12\x43\n\x08SendText\x12\x1a.xiaozhi.audio.TextRequest\x1a\x1b.xiaozhi.audio.TextResponse\x12Z\n\x11HandleDeviceEvent\x12!.xiaozhi.audio.DeviceEventRequest\x1a\".xiaozhi.audio.DeviceEventResponse\x12L\n\x05\x41\x62ort\x12 .xiaozhi.audio.AgentAbortRequest\x1a!.xiaozhi.audio.AgentAbortResponse2\x8e\x02\n\x13\x41udioSpeakerService\x12\x46\n\tSpeakText\x12\x1b.xiaozhi.audio.SpeakRequest\x1a\x1c.xiaozhi.audio.SpeakResponse\x12P\n\x05\x41\x62ort\x12\".xiaozhi.audio.SpeakerAbortRequest\x1a#.xiaozhi.audio.SpeakerAbortResponse\x12]\n\x0e\x42roadcastSpeak\x12$.xiaozhi.audio.BroadcastSpeakRequest\x1a%.xiaozhi.audio.BroadcastSpeakResponse2e\n\x12\x41\x63\x63\x65ssAudioService\x12O\n\x0cSendTtsAudio\x12\x1e.xiaozhi.audio.TtsAudioRequest\x1a\x1f.xiaozhi.audio.TtsAudioResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -44,29 +44,37 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_TEXTRESPONSE']._serialized_start=414
   _globals['_TEXTRESPONSE']._serialized_end=471
   _globals['_SPEAKREQUEST']._serialized_start=473
-  _globals['_SPEAKREQUEST']._serialized_end=587
-  _globals['_SPEAKRESPONSE']._serialized_start=589
-  _globals['_SPEAKRESPONSE']._serialized_end=647
-  _globals['_TTSAUDIOREQUEST']._serialized_start=650
-  _globals['_TTSAUDIOREQUEST']._serialized_end=781
-  _globals['_TTSAUDIORESPONSE']._serialized_start=783
-  _globals['_TTSAUDIORESPONSE']._serialized_end=844
-  _globals['_DEVICEEVENTREQUEST']._serialized_start=846
-  _globals['_DEVICEEVENTREQUEST']._serialized_end=947
-  _globals['_DEVICEEVENTRESPONSE']._serialized_start=949
-  _globals['_DEVICEEVENTRESPONSE']._serialized_end=1013
-  _globals['_AGENTABORTREQUEST']._serialized_start=1015
-  _globals['_AGENTABORTREQUEST']._serialized_end=1089
-  _globals['_AGENTABORTRESPONSE']._serialized_start=1091
-  _globals['_AGENTABORTRESPONSE']._serialized_end=1154
-  _globals['_AUDIOPREPROCESSSERVICE']._serialized_start=1157
-  _globals['_AUDIOPREPROCESSSERVICE']._serialized_end=1337
-  _globals['_AUDIORECEIVERSERVICE']._serialized_start=1339
-  _globals['_AUDIORECEIVERSERVICE']._serialized_end=1450
-  _globals['_AGENTSERVICE']._serialized_start=1453
-  _globals['_AGENTSERVICE']._serialized_end=1706
-  _globals['_AUDIOSPEAKERSERVICE']._serialized_start=1708
-  _globals['_AUDIOSPEAKERSERVICE']._serialized_end=1801
-  _globals['_ACCESSAUDIOSERVICE']._serialized_start=1803
-  _globals['_ACCESSAUDIOSERVICE']._serialized_end=1904
+  _globals['_SPEAKREQUEST']._serialized_end=600
+  _globals['_SPEAKRESPONSE']._serialized_start=602
+  _globals['_SPEAKRESPONSE']._serialized_end=660
+  _globals['_TTSAUDIOREQUEST']._serialized_start=663
+  _globals['_TTSAUDIOREQUEST']._serialized_end=829
+  _globals['_TTSAUDIORESPONSE']._serialized_start=831
+  _globals['_TTSAUDIORESPONSE']._serialized_end=892
+  _globals['_DEVICEEVENTREQUEST']._serialized_start=894
+  _globals['_DEVICEEVENTREQUEST']._serialized_end=995
+  _globals['_DEVICEEVENTRESPONSE']._serialized_start=997
+  _globals['_DEVICEEVENTRESPONSE']._serialized_end=1061
+  _globals['_AGENTABORTREQUEST']._serialized_start=1063
+  _globals['_AGENTABORTREQUEST']._serialized_end=1137
+  _globals['_AGENTABORTRESPONSE']._serialized_start=1139
+  _globals['_AGENTABORTRESPONSE']._serialized_end=1202
+  _globals['_SPEAKERABORTREQUEST']._serialized_start=1204
+  _globals['_SPEAKERABORTREQUEST']._serialized_end=1280
+  _globals['_SPEAKERABORTRESPONSE']._serialized_start=1282
+  _globals['_SPEAKERABORTRESPONSE']._serialized_end=1347
+  _globals['_BROADCASTSPEAKREQUEST']._serialized_start=1349
+  _globals['_BROADCASTSPEAKREQUEST']._serialized_end=1433
+  _globals['_BROADCASTSPEAKRESPONSE']._serialized_start=1435
+  _globals['_BROADCASTSPEAKRESPONSE']._serialized_end=1518
+  _globals['_AUDIOPREPROCESSSERVICE']._serialized_start=1521
+  _globals['_AUDIOPREPROCESSSERVICE']._serialized_end=1701
+  _globals['_AUDIORECEIVERSERVICE']._serialized_start=1703
+  _globals['_AUDIORECEIVERSERVICE']._serialized_end=1814
+  _globals['_AGENTSERVICE']._serialized_start=1817
+  _globals['_AGENTSERVICE']._serialized_end=2070
+  _globals['_AUDIOSPEAKERSERVICE']._serialized_start=2073
+  _globals['_AUDIOSPEAKERSERVICE']._serialized_end=2343
+  _globals['_ACCESSAUDIOSERVICE']._serialized_start=2345
+  _globals['_ACCESSAUDIOSERVICE']._serialized_end=2446
 # @@protoc_insertion_point(module_scope)

@@ -10,10 +10,19 @@ from xiaozhi_common.nacos.client import create_nacos_client
 from xiaozhi_common.nacos.registry import NacosRegistry
 from xiaozhi_common.nacos.resolver import ServiceResolver
 from xiaozhi import audio_pb2_grpc
+
+from app.core.config_loader import runtime_config
+from app.core.downlink import Downlink
+from app.core.speak_session import session_store
+from app.providers.tts import create_tts
 from app.server.speaker_service import AudioSpeakerServicer
 
 
 def serve(config: BaseServerConfig) -> None:
+    runtime_config.reload()
+    tts = create_tts(runtime_config.data)
+    frame_ms = int(runtime_config.get("frame_duration_ms") or 60)
+
     ip = config.get_local_ip()
     port = config.resolve_grpc_port(DEFAULT_PORTS[SPEAKER_SERVICE])
     nacos = create_nacos_client(config)
@@ -27,6 +36,7 @@ def serve(config: BaseServerConfig) -> None:
     resolver = ServiceResolver(config, nacos)
     resolver.watch(ACCESS_SERVICE)
     pool = GrpcClientPool(resolver)
+    session_store.configure(tts, Downlink(pool), frame_duration_ms=frame_ms)
 
     def register(server):  # noqa: ANN001
         audio_pb2_grpc.add_AudioSpeakerServiceServicer_to_server(
@@ -36,7 +46,7 @@ def serve(config: BaseServerConfig) -> None:
     server = start_grpc_server(
         port=port, max_workers=config.rpc_max_connect, register_fn=register
     )
-    logger.info(f"{config.server_name} ready grpc={port}")
+    logger.info(f"{config.server_name} ready grpc={port} (phase-4 TTS)")
     try:
         server.wait_for_termination()
     except KeyboardInterrupt:

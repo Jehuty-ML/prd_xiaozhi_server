@@ -19,7 +19,7 @@ def _run(cmd: list[str], *, label: str) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="xiaozhi-microserver phase-3 tests")
+    parser = argparse.ArgumentParser(description="xiaozhi-microserver phase-4 tests")
     parser.add_argument("--unit-only", action="store_true")
     parser.add_argument("--smoke-only", action="store_true")
     parser.add_argument("--skip-ota", action="store_true")

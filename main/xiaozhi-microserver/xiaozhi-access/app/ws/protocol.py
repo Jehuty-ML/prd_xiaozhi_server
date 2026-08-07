@@ -11,7 +11,12 @@ from fastapi import WebSocket
 from loguru import logger
 
 from xiaozhi import admin_pb2, admin_pb2_grpc, audio_pb2, audio_pb2_grpc
-from xiaozhi_common.constants import AGENT_SERVICE, MODEL_ADMIN_SERVICE, PREPROCESS_SERVICE
+from xiaozhi_common.constants import (
+    AGENT_SERVICE,
+    MODEL_ADMIN_SERVICE,
+    PREPROCESS_SERVICE,
+    SPEAKER_SERVICE,
+)
 from xiaozhi_common.grpc.client import GrpcClientPool
 from app.ws.gateway_runtime import gateway_runtime
 from app.ws.manager import connection_manager
@@ -182,10 +187,10 @@ async def _handle_abort(
             ensure_ascii=False,
         )
     )
-    # Fan-out abort to agent (cancel in-flight chat / tools)
+    # Fan-out abort to agent (cancel chat) + speaker (drain TTS queues)
     message_id = uuid.uuid4().hex
 
-    def _call():
+    def _abort_agent():
         stub = audio_pb2_grpc.AgentServiceStub(pool.channel(AGENT_SERVICE))
         return stub.Abort(
             audio_pb2.AgentAbortRequest(
@@ -195,10 +200,24 @@ async def _handle_abort(
             timeout=5,
         )
 
+    def _abort_speaker():
+        stub = audio_pb2_grpc.AudioSpeakerServiceStub(pool.channel(SPEAKER_SERVICE))
+        return stub.Abort(
+            audio_pb2.SpeakerAbortRequest(
+                message_id=message_id, client_id=client_id, reason=str(reason)
+            ),
+            metadata=pool.metadata(client_id, message_id),
+            timeout=5,
+        )
+
     try:
-        await asyncio.to_thread(_call)
+        await asyncio.to_thread(_abort_agent)
     except Exception as exc:  # noqa: BLE001
         logger.debug(f"Agent abort fan-out skipped: {exc}")
+    try:
+        await asyncio.to_thread(_abort_speaker)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"Speaker abort fan-out skipped: {exc}")
     logger.info(f"WS abort client_id={client_id} session={session_id} reason={reason}")
 
 
@@ -241,13 +260,44 @@ async def _handle_server(
         return
 
     if action == "broadcast_speak":
+        secret = str(content.get("secret") or "")
+        expected = gateway_runtime.manager_secret()
+        if expected and secret != expected:
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "server",
+                        "status": "error",
+                        "message": "服务器密钥验证失败",
+                        "content": {"action": "broadcast_speak"},
+                    },
+                    ensure_ascii=False,
+                )
+            )
+            return
+        text = str(content.get("text") or payload.get("text") or "").strip()
+        if not text:
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "server",
+                        "status": "error",
+                        "message": "broadcast_speak missing text",
+                        "content": {"action": "broadcast_speak"},
+                    },
+                    ensure_ascii=False,
+                )
+            )
+            return
+        exclude = connection_manager.get_client_id(websocket) or ""
+        spoken = await _broadcast_speak(pool, text, exclude_client_id=exclude)
         await websocket.send_text(
             json.dumps(
                 {
                     "type": "server",
-                    "status": "accepted",
-                    "message": "broadcast_speak deferred to phase-4 TTS pipeline",
-                    "content": {"action": "broadcast_speak"},
+                    "status": "success",
+                    "message": f"broadcast_speak ok spoken={spoken}",
+                    "content": {"action": "broadcast_speak", "spoken": spoken},
                 },
                 ensure_ascii=False,
             )
@@ -264,6 +314,31 @@ async def _handle_server(
             ensure_ascii=False,
         )
     )
+
+
+async def _broadcast_speak(
+    pool: GrpcClientPool, text: str, *, exclude_client_id: str = ""
+) -> int:
+    message_id = uuid.uuid4().hex
+
+    def _call():
+        stub = audio_pb2_grpc.AudioSpeakerServiceStub(pool.channel(SPEAKER_SERVICE))
+        return stub.BroadcastSpeak(
+            audio_pb2.BroadcastSpeakRequest(
+                message_id=message_id,
+                text=text,
+                exclude_client_id=exclude_client_id,
+            ),
+            metadata=pool.metadata(message_id=message_id),
+            timeout=60,
+        )
+
+    try:
+        resp = await asyncio.to_thread(_call)
+        return int(resp.spoken or 0)
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"BroadcastSpeak failed: {exc}")
+        return 0
 
 
 async def _reload_via_admin(pool: GrpcClientPool, reason: str) -> bool:

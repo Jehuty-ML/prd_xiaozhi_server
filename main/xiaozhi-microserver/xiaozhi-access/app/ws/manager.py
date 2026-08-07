@@ -114,5 +114,9 @@ class ConnectionManager:
     def active_count(self) -> int:
         return len(self._by_client)
 
+    def list_client_ids(self) -> list[str]:
+        with self._lock:
+            return list(self._by_client.keys())
+
 
 connection_manager = ConnectionManager()
