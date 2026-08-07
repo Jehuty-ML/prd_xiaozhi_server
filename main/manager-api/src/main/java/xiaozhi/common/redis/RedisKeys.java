@@ -195,4 +195,17 @@ public class RedisKeys {
         return "device:address_book:all";
     }
 
+    /**
+     * Dialogue 实例注册 Hash（field=instanceId, value=JSON）
+     * 与 Python / Java dialogue 共用
+     */
+    public static final String DIALOGUE_SERVERS = "xiaozhi:dialogue:servers";
+
+    /**
+     * Dialogue 实例心跳 key（TTL 存活判定）
+     */
+    public static String getDialogueHeartbeatKey(String instanceId) {
+        return "xiaozhi:dialogue:heartbeat:" + instanceId;
+    }
+
 }

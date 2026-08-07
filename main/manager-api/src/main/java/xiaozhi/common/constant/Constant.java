@@ -147,6 +147,11 @@ public interface Constant {
     String SERVER_AUTH_ENABLED = "server.auth.enabled";
 
     /**
+     * Dialogue 多实例注册心跳开关
+     */
+    String SERVER_REGISTRY_ENABLED = "server.registry.enabled";
+
+    /**
      * 系统功能菜单配置
      */
     String SYSTEM_WEB_MENU = "system-web.menu";

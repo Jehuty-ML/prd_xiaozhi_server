@@ -28,6 +28,7 @@ import xiaozhi.modules.device.dto.DeviceReportReqDTO;
 import xiaozhi.modules.device.dto.DeviceReportRespDTO;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.service.DeviceService;
+import xiaozhi.modules.device.service.DialogueServerRegistry;
 import xiaozhi.modules.sys.service.SysParamsService;
 
 @Tag(name = "设备管理", description = "OTA 相关接口")
@@ -38,6 +39,7 @@ import xiaozhi.modules.sys.service.SysParamsService;
 public class OTAController {
     private final DeviceService deviceService;
     private final SysParamsService sysParamsService;
+    private final DialogueServerRegistry dialogueServerRegistry;
 
     @Operation(summary = "OTA版本和设备激活状态检查")
     @PostMapping
@@ -89,7 +91,16 @@ public class OTAController {
         if (StringUtils.isBlank(otaUrl) || otaUrl.equals("null")) {
             return ResponseEntity.ok("OTA接口不正常，缺少ota地址，请登录智控台，在参数管理找到【server.ota】配置");
         }
-        return ResponseEntity.ok("OTA接口运行正常，websocket集群数量：" + wsUrl.split(";").length);
+        int staticCount = wsUrl.split(";").length;
+        int registeredCount = 0;
+        try {
+            registeredCount = dialogueServerRegistry.countAvailableServers();
+        } catch (Exception e) {
+            log.warn("读取 Dialogue 注册心跳失败: {}", e.getMessage());
+        }
+        return ResponseEntity.ok(String.format(
+                "OTA接口运行正常，websocket静态集群数量：%d，已注册存活实例：%d",
+                staticCount, registeredCount));
     }
 
     @SneakyThrows

@@ -57,10 +57,12 @@ import xiaozhi.modules.device.dto.DeviceManualAddDTO;
 import xiaozhi.modules.device.dto.DevicePageUserDTO;
 import xiaozhi.modules.device.dto.DeviceReportReqDTO;
 import xiaozhi.modules.device.dto.DeviceReportRespDTO;
+import xiaozhi.modules.device.dto.DialogueServerInfo;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.entity.OtaEntity;
 import xiaozhi.modules.device.service.DeviceAddressBookService;
 import xiaozhi.modules.device.service.DeviceService;
+import xiaozhi.modules.device.service.DialogueServerRegistry;
 import xiaozhi.modules.device.service.OtaService;
 import xiaozhi.modules.device.vo.UserShowDeviceListVO;
 import xiaozhi.modules.security.user.SecurityUser;
@@ -78,6 +80,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
     private final RedisUtils redisUtils;
     private final OtaService otaService;
     private final DeviceAddressBookService deviceAddressBookService;
+    private final DialogueServerRegistry dialogueServerRegistry;
 
     @Async
     public void updateDeviceConnectionInfo(String agentId, String deviceId, String appVersion) {
@@ -213,8 +216,23 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
 
         // 添加WebSocket配置
         DeviceReportRespDTO.Websocket websocket = new DeviceReportRespDTO.Websocket();
-        // 从系统参数获取WebSocket URL，如果未配置则使用默认值
-        String wsUrl = sysParamsService.getValue(Constant.SERVER_WEBSOCKET, true);
+        // 优先从 Redis 注册中心选存活 Dialogue 实例；无存活则回退静态 server.websocket
+        String wsUrl = null;
+        try {
+            DialogueServerInfo selected = dialogueServerRegistry.selectServer();
+            if (selected != null && StringUtils.isNotBlank(selected.getWebsocketAddress())) {
+                wsUrl = selected.getWebsocketAddress();
+                log.debug("OTA 选用已注册 Dialogue 实例: instanceId={}, ws={}",
+                        selected.getInstanceId(), wsUrl);
+            }
+        } catch (Exception e) {
+            log.warn("从 Dialogue 注册中心选路失败，回退静态配置: {}", e.getMessage());
+        }
+
+        if (StringUtils.isBlank(wsUrl)) {
+            // 从系统参数获取WebSocket URL，如果未配置则使用默认值
+            wsUrl = sysParamsService.getValue(Constant.SERVER_WEBSOCKET, true);
+        }
 
         // 检查是否启用认证并生成token
         String authEnabled = sysParamsService.getValue(Constant.SERVER_AUTH_ENABLED, true);
@@ -235,15 +253,17 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
             log.error("WebSocket地址未配置，请登录智控台，在参数管理找到【server.websocket】配置");
             wsUrl = "ws://xiaozhi.server.com:8000/xiaozhi/v1/";
             websocket.setUrl(wsUrl);
-        } else {
+        } else if (wsUrl.contains(";")) {
             String[] wsUrls = wsUrl.split("\\;");
-            if (wsUrls.length > 0) {
-                // 随机选择一个WebSocket URL
+            if (wsUrls.length > 0 && StringUtils.isNotBlank(wsUrls[0])) {
+                // 静态多地址：随机选择一个
                 websocket.setUrl(wsUrls[RandomUtil.randomInt(0, wsUrls.length)]);
             } else {
                 log.error("WebSocket地址未配置，请登录智控台，在参数管理找到【server.websocket】配置");
                 websocket.setUrl("ws://xiaozhi.server.com:8000/xiaozhi/v1/");
             }
+        } else {
+            websocket.setUrl(wsUrl);
         }
 
         response.setWebsocket(websocket);
