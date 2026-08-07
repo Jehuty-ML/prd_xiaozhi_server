@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BASE=(--env=dev --group_name=DEV_GROUP --disable_nacos --nacos_host=127.0.0.1 --nacos_port=8848)
 
-echo "[INFO] Starting xiaozhi-microserver (phase-1 stub pipeline)..."
+echo "[INFO] Starting xiaozhi-microserver (phase-2 control plane + gateway)..."
 
 (
   cd "$ROOT/xiaozhi-model-admin"
@@ -32,6 +32,7 @@ sleep 2
 ) &
 
 echo "[SUCCESS] Services launched in background."
-echo "[TIPS] WS: ws://127.0.0.1:8103/ws?device-id=test-001"
-echo "[TIPS] Smoke: python scripts/ws_smoke.py"
+echo "[TIPS] WS: ws://127.0.0.1:8103/xiaozhi/v1/?device-id=test-001"
+echo "[TIPS] OTA: http://127.0.0.1:8004/xiaozhi/ota/"
+echo "[TIPS] Smoke: python scripts/ws_smoke.py && python scripts/ota_smoke.py"
 wait

@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0b\x61\x64min.proto\x12\rxiaozhi.admin\"I\n\x10GetConfigRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x14\n\x0cservice_name\x18\x02 \x01(\t\x12\x0b\n\x03key\x18\x03 \x01(\t\"C\n\x11GetConfigResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x13\n\x0b\x63onfig_json\x18\x03 \x01(\t\"9\n\x13ReloadConfigRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x0e\n\x06reason\x18\x02 \x01(\t\"A\n\x14ReloadConfigResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\"#\n\rHealthRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\"P\n\x0eHealthResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06status\x18\x03 \x01(\t\x12\x13\n\x0b\x64\x65tail_json\x18\x04 \x01(\t2\x83\x02\n\x11ModelAdminService\x12N\n\tGetConfig\x12\x1f.xiaozhi.admin.GetConfigRequest\x1a .xiaozhi.admin.GetConfigResponse\x12W\n\x0cReloadConfig\x12\".xiaozhi.admin.ReloadConfigRequest\x1a#.xiaozhi.admin.ReloadConfigResponse\x12\x45\n\x06Health\x12\x1c.xiaozhi.admin.HealthRequest\x1a\x1d.xiaozhi.admin.HealthResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0b\x61\x64min.proto\x12\rxiaozhi.admin\"I\n\x10GetConfigRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x14\n\x0cservice_name\x18\x02 \x01(\t\x12\x0b\n\x03key\x18\x03 \x01(\t\"C\n\x11GetConfigResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x13\n\x0b\x63onfig_json\x18\x03 \x01(\t\"9\n\x13ReloadConfigRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x0e\n\x06reason\x18\x02 \x01(\t\"A\n\x14ReloadConfigResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\"#\n\rHealthRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\"P\n\x0eHealthResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06status\x18\x03 \x01(\t\x12\x13\n\x0b\x64\x65tail_json\x18\x04 \x01(\t\"M\n\x12\x41pplyConfigRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x13\n\x0b\x63onfig_json\x18\x02 \x01(\t\x12\x0e\n\x06reason\x18\x03 \x01(\t\"@\n\x13\x41pplyConfigResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t2\x83\x02\n\x11ModelAdminService\x12N\n\tGetConfig\x12\x1f.xiaozhi.admin.GetConfigRequest\x1a .xiaozhi.admin.GetConfigResponse\x12W\n\x0cReloadConfig\x12\".xiaozhi.admin.ReloadConfigRequest\x1a#.xiaozhi.admin.ReloadConfigResponse\x12\x45\n\x06Health\x12\x1c.xiaozhi.admin.HealthRequest\x1a\x1d.xiaozhi.admin.HealthResponse2j\n\x12\x43onfigApplyService\x12T\n\x0b\x41pplyConfig\x12!.xiaozhi.admin.ApplyConfigRequest\x1a\".xiaozhi.admin.ApplyConfigResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -43,6 +43,12 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_HEALTHREQUEST']._serialized_end=335
   _globals['_HEALTHRESPONSE']._serialized_start=337
   _globals['_HEALTHRESPONSE']._serialized_end=417
-  _globals['_MODELADMINSERVICE']._serialized_start=420
-  _globals['_MODELADMINSERVICE']._serialized_end=679
+  _globals['_APPLYCONFIGREQUEST']._serialized_start=419
+  _globals['_APPLYCONFIGREQUEST']._serialized_end=496
+  _globals['_APPLYCONFIGRESPONSE']._serialized_start=498
+  _globals['_APPLYCONFIGRESPONSE']._serialized_end=562
+  _globals['_MODELADMINSERVICE']._serialized_start=565
+  _globals['_MODELADMINSERVICE']._serialized_end=824
+  _globals['_CONFIGAPPLYSERVICE']._serialized_start=826
+  _globals['_CONFIGAPPLYSERVICE']._serialized_end=932
 # @@protoc_insertion_point(module_scope)

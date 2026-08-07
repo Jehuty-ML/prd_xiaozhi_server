@@ -1,6 +1,6 @@
 ﻿# xiaozhi-microserver
 
-将开源单体 [`xiaozhi-server`](../xiaozhi-server) 按 Nacos + gRPC 微服务架构拆分后的实现（第一期：骨架 + 契约 + 假链路联调）。
+将开源单体 [`xiaozhi-server`](../xiaozhi-server) 按 Nacos + gRPC 微服务架构拆分后的实现（**第二期：控制面 + 网关真实化**）。
 
 > 参考架构：仓库旁 `micro_service` 的进程划分与通信方式。  
 > 命名：全部使用 **xiaozhi** 语义，不引入专有业务名词。
@@ -9,24 +9,30 @@
 
 | 目录 | Nacos 名 | Dev 端口 | 职责 |
 |------|----------|----------|------|
-| `xiaozhi-access` | `xiaozhi-access-grpc-service` | HTTP **8103** / gRPC **50051** | 设备 WebSocket 入口、鉴权钩子、协议解复用、会话状态、下行 TTS/指令回写；上行转 preprocess |
+| `xiaozhi-access` | `xiaozhi-access-grpc-service` | HTTP **8103** / gRPC **50051** | 设备 WebSocket 入口、鉴权、连接上限、协议解复用、会话状态、下行 TTS/指令回写；上行转 preprocess |
 | `xiaozhi-agent` | `xiaozhi-agent-grpc-service` | gRPC **50052** | Intent / LLM / Memory / 工具插件 / MCP·IoT（经 access 代理）；句子流给 speaker |
 | `xiaozhi-audio-speaker` | `xiaozhi-audio-speaker-grpc-service` | gRPC **50053** | TTS 合成与分句队列；经 access `SendTtsAudio` 写回设备 |
 | `xiaozhi-audio-preprocess` | `xiaozhi-audio-preprocess-grpc-service` | gRPC **50054** | 解码 / VAD 分句；调 receiver ASR；通知 access 听状态；投递文本给 agent |
 | `xiaozhi-audio-receiver` | `xiaozhi-audio-receiver-grpc-service` | gRPC **50055** | ASR：PCM → 文本（含声纹扩展位） |
-| `xiaozhi-model-admin` | `xiaozhi-model-admin-grpc-service` | HTTP **8004** / gRPC **50056** | 配置 / 热更新 / manager-api 对接 / OTA·视觉·health·metrics（控制面） |
+| `xiaozhi-model-admin` | `xiaozhi-model-admin-grpc-service` | HTTP **8004** / gRPC **50056** | 配置 / 热更新广播 / manager-api 对接 / OTA·视觉·health·metrics（控制面） |
 
-公共库：`common/xiaozhi_common`（配置、Nacos、gRPC、session DTO）+ `common/proto`（统一契约）。
+公共库：`common/xiaozhi_common`（配置、Nacos、gRPC、session DTO、auth / runtime_env）+ `common/proto`（统一契约）。
 
 > 并存说明：原单体常用 HTTP `8003`，本仓库 access 默认用 **8103**，避免与仍在运行的 `xiaozhi-server` 冲突。删除单体后可改回 8003。
 
-## 假链路（第一期）
+## 第二期能力
+
+- **model-admin**：`/xiaozhi/ota/`、`/mcp/vision/explain`、`/health`、`/ready`、`/metrics`；本地 YAML + 可选 manager-api 拉取；`ReloadConfig` 后 gRPC `ConfigApplyService` 广播到 access
+- **access**：协议路径 `/xiaozhi/v1/`（`/ws` 仍可用）；hello / listen / abort / ping / server；连接硬上限；HMAC 生产鉴权钩子
+- ASR / LLM / TTS 仍为假实现（第三～五期迁移）
 
 ```
+Device --OTA--> model-admin
 Device --WS--> access --gRPC--> preprocess --gRPC--> receiver (ASR stub)
                               |--gRPC--> agent (echo reply)
                               |--gRPC--> speaker (TTS stub bytes)
                               |--gRPC--> access --WS--> Device
+model-admin --ApplyConfig--> access
 ```
 
 ## 快速开始
@@ -44,6 +50,8 @@ bash start_dev_services.sh
 
 # 冒烟（需六服务已起）
 python scripts/ws_smoke.py
+python scripts/ws_smoke.py --abort
+python scripts/ota_smoke.py
 ```
 
 默认带 `--disable_nacos`，用静态端口互发现。有 Nacos 时去掉该参数，并配置 `--nacos_host` / `--group_name` / `--env_id`。
@@ -52,11 +60,13 @@ python scripts/ws_smoke.py
 
 ### 手动探活
 
-- Access health: `http://127.0.0.1:8103/health`
-- Model-admin health: `http://127.0.0.1:8004/health`
-- Model-admin config: `http://127.0.0.1:8004/config`
-- WS: `ws://127.0.0.1:8103/ws?device-id=test-001`  
-  发送：`{"type":"listen","text":"hello"}`，应收到 `type=tts` JSON 与 stub 二进制。
+- Access health / ready: `http://127.0.0.1:8103/health` 、`/ready`
+- Model-admin: `http://127.0.0.1:8004/health` 、`/ready` 、`/metrics` 、`/config`
+- OTA: `POST http://127.0.0.1:8004/xiaozhi/ota/`（header: `device-id` / `client-id`）
+- Vision: `GET|POST http://127.0.0.1:8004/mcp/vision/explain`
+- WS: `ws://127.0.0.1:8103/xiaozhi/v1/?device-id=test-001`  
+  发送：`{"type":"listen","state":"detect","text":"hello"}`，应收到 `type=tts` JSON 与 stub 二进制。
+- 热更新：`POST http://127.0.0.1:8004/config/reload`（会广播到 access）
 
 ## 与单体模块映射
 
@@ -76,18 +86,18 @@ python scripts/ws_smoke.py
 | 文件 | 内容 |
 |------|------|
 | `common/proto/audio.proto` | `SendAudioChunk` / `AsrRecognize` / `SendText` / `SpeakText` / `SendTtsAudio` |
-| `common/proto/command.proto` | listen 状态、设备指令 |
-| `common/proto/session.proto` | Abort 扇出（二期 barge-in） |
-| `common/proto/admin.proto` | GetConfig / ReloadConfig / Health |
+| `common/proto/command.proto` | listen 状态、设备指令、`GetConnectionStats` |
+| `common/proto/session.proto` | Abort / Ping（扇出仍待后续） |
+| `common/proto/admin.proto` | GetConfig / ReloadConfig / Health；`ConfigApplyService.ApplyConfig` 热更新广播 |
 
 ## 演进路线
 
-### 第一期（当前）
+### 第一期（完成）
 
 骨架、统一 proto、Nacos/静态发现、假 ASR/LLM/TTS 端到端联调。  
 **不删除** `xiaozhi-server`，两边并存。
 
-### 第二期：控制面 + 网关真实化
+### 第二期（当前）
 
 - OTA / vision / health / metrics → `xiaozhi-model-admin`
 - 完整 WS 协议、连接上限、生产鉴权 → `xiaozhi-access`
@@ -111,7 +121,7 @@ python scripts/ws_smoke.py
 ### 第六期：收口
 
 - 韧性、指标、连接上限落地
-- 生产 compose / 门禁对齐
+- 生产 compose / 门禁切换
 - **删除** `main/xiaozhi-server`，文档与 CI 指向本目录
 
 ## 关键耦合（后续必须显式设计）
@@ -138,5 +148,5 @@ xiaozhi-microserver/
   xiaozhi-audio-receiver/
   xiaozhi-audio-speaker/
   xiaozhi-model-admin/
-  scripts/ws_smoke.py
+  scripts/ws_smoke.py  scripts/ota_smoke.py
 ```

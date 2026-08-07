@@ -9,23 +9,38 @@ from loguru import logger
 
 
 class ConnectionManager:
-    """In-memory device WebSocket registry (phase-1)."""
+    """In-memory device WebSocket registry."""
 
     def __init__(self) -> None:
         self._by_client: dict[str, WebSocket] = {}
         self._by_ws: dict[WebSocket, str] = {}
         self._states: dict[str, str] = {}
+        self._meta: dict[str, dict[str, Any]] = {}
+        self._session_by_client: dict[str, str] = {}
         self._lock = threading.Lock()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
 
-    def bind(self, client_id: str, ws: WebSocket) -> None:
+    def bind(
+        self,
+        client_id: str,
+        ws: WebSocket,
+        *,
+        session_id: str = "",
+        device_id: str = "",
+    ) -> None:
         with self._lock:
             self._by_client[client_id] = ws
             self._by_ws[ws] = client_id
             self._states[client_id] = "connected"
+            self._meta[client_id] = {
+                "device_id": device_id or client_id,
+                "session_id": session_id,
+            }
+            if session_id:
+                self._session_by_client[client_id] = session_id
         logger.info(f"WS bound client_id={client_id} active={len(self._by_client)}")
 
     def unbind(self, ws: WebSocket) -> None:
@@ -34,6 +49,8 @@ class ConnectionManager:
             if client_id:
                 self._by_client.pop(client_id, None)
                 self._states.pop(client_id, None)
+                self._meta.pop(client_id, None)
+                self._session_by_client.pop(client_id, None)
                 logger.info(f"WS unbound client_id={client_id}")
 
     def get_client_id(self, ws: WebSocket) -> Optional[str]:
@@ -46,6 +63,14 @@ class ConnectionManager:
         with self._lock:
             if client_id in self._by_client:
                 self._states[client_id] = state
+
+    def set_meta(self, client_id: str, key: str, value: Any) -> None:
+        with self._lock:
+            meta = self._meta.setdefault(client_id, {})
+            meta[key] = value
+
+    def get_meta(self, client_id: str) -> dict[str, Any]:
+        return dict(self._meta.get(client_id) or {})
 
     async def send_bytes(self, client_id: str, data: bytes) -> bool:
         ws = self._by_client.get(client_id)
@@ -90,5 +115,4 @@ class ConnectionManager:
         return len(self._by_client)
 
 
-# Process-wide singleton used by gRPC servicers and FastAPI routes
 connection_manager = ConnectionManager()

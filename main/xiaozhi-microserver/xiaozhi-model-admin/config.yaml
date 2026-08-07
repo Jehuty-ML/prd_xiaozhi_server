@@ -1,12 +1,52 @@
 server:
   name: xiaozhi-microserver
-  phase: 1
+  phase: 2
+  environment: development
+  # access WS port (OTA websocket.url uses this)
+  port: 8103
+  # model-admin HTTP port
+  http_port: 8004
+  websocket: "ws://127.0.0.1:8103/xiaozhi/v1/"
+  vision_explain: "http://127.0.0.1:8004/mcp/vision/explain"
+  auth_key: ""
+  timezone_offset: 8
+  auth:
+    enabled: false
+    expire_seconds: 2592000
+    allowed_devices: []
+    allow_whitelist_bypass: true
+    devices_allowlist_only: false
+  connection:
+    max_connections: 200
+    max_connections_per_device: 2
+  metrics:
+    enabled: true
+  health:
+    liveness_path: /health
+    readiness_path: /ready
+
+xiaozhi:
+  type: hello
+  version: 1
+  transport: websocket
+  audio_params:
+    format: opus
+    sample_rate: 24000
+    channels: 1
+    frame_duration: 60
+
 selected_module:
   ASR: StubASR
   TTS: StubTTS
   LLM: StubLLM
+
 manager_api:
   url: ""
   secret: ""
   enabled: false
-  note: "Wire manage_api_client here in phase 2"
+
+# Alias kept for manage-api client compatibility with monolith key name
+manager-api:
+  url: ""
+  secret: ""
+  enabled: false

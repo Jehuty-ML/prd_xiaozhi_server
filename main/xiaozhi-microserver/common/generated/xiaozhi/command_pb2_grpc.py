@@ -26,7 +26,7 @@ if _version_not_supported:
 
 
 class AccessCommandServiceStub:
-    """Access command surface (listen state, device cmds)
+    """Access command surface (listen state, device cmds, capacity)
     """
 
     def __init__(self, channel):
@@ -45,10 +45,15 @@ class AccessCommandServiceStub:
                 request_serializer=command__pb2.DeviceStateRequest.SerializeToString,
                 response_deserializer=command__pb2.DeviceStateResponse.FromString,
                 _registered_method=True)
+        self.GetConnectionStats = channel.unary_unary(
+                '/xiaozhi.command.AccessCommandService/GetConnectionStats',
+                request_serializer=command__pb2.ConnectionStatsRequest.SerializeToString,
+                response_deserializer=command__pb2.ConnectionStatsResponse.FromString,
+                _registered_method=True)
 
 
 class AccessCommandServiceServicer:
-    """Access command surface (listen state, device cmds)
+    """Access command surface (listen state, device cmds, capacity)
     """
 
     def SendCommand(self, request, context):
@@ -58,6 +63,12 @@ class AccessCommandServiceServicer:
         raise NotImplementedError('Method not implemented!')
 
     def GetDeviceState(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetConnectionStats(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -76,6 +87,11 @@ def add_AccessCommandServiceServicer_to_server(servicer, server):
                     request_deserializer=command__pb2.DeviceStateRequest.FromString,
                     response_serializer=command__pb2.DeviceStateResponse.SerializeToString,
             ),
+            'GetConnectionStats': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetConnectionStats,
+                    request_deserializer=command__pb2.ConnectionStatsRequest.FromString,
+                    response_serializer=command__pb2.ConnectionStatsResponse.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'xiaozhi.command.AccessCommandService', rpc_method_handlers)
@@ -85,7 +101,7 @@ def add_AccessCommandServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class AccessCommandService:
-    """Access command surface (listen state, device cmds)
+    """Access command surface (listen state, device cmds, capacity)
     """
 
     @staticmethod
@@ -132,6 +148,33 @@ class AccessCommandService:
             '/xiaozhi.command.AccessCommandService/GetDeviceState',
             command__pb2.DeviceStateRequest.SerializeToString,
             command__pb2.DeviceStateResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetConnectionStats(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/xiaozhi.command.AccessCommandService/GetConnectionStats',
+            command__pb2.ConnectionStatsRequest.SerializeToString,
+            command__pb2.ConnectionStatsResponse.FromString,
             options,
             channel_credentials,
             insecure,

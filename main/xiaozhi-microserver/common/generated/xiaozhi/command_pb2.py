@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rcommand.proto\x12\x0fxiaozhi.command\"Y\n\x0e\x43ommandRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0f\n\x07\x63ommand\x18\x03 \x01(\t\x12\x0f\n\x07payload\x18\x04 \x01(\t\"<\n\x0f\x43ommandResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\";\n\x12\x44\x65viceStateRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\"?\n\x13\x44\x65viceStateResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\r\n\x05state\x18\x03 \x01(\t2\xc5\x01\n\x14\x41\x63\x63\x65ssCommandService\x12P\n\x0bSendCommand\x12\x1f.xiaozhi.command.CommandRequest\x1a .xiaozhi.command.CommandResponse\x12[\n\x0eGetDeviceState\x12#.xiaozhi.command.DeviceStateRequest\x1a$.xiaozhi.command.DeviceStateResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rcommand.proto\x12\x0fxiaozhi.command\"Y\n\x0e\x43ommandRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\x12\x0f\n\x07\x63ommand\x18\x03 \x01(\t\x12\x0f\n\x07payload\x18\x04 \x01(\t\"<\n\x0f\x43ommandResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06result\x18\x03 \x01(\t\";\n\x12\x44\x65viceStateRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\"?\n\x13\x44\x65viceStateResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\r\n\x05state\x18\x03 \x01(\t\",\n\x16\x43onnectionStatsRequest\x12\x12\n\nmessage_id\x18\x01 \x01(\t\"\x99\x01\n\x17\x43onnectionStatsResponse\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0b\n\x03msg\x18\x02 \x01(\t\x12\x0e\n\x06\x61\x63tive\x18\x03 \x01(\x05\x12\x17\n\x0fmax_connections\x18\x04 \x01(\x05\x12\"\n\x1amax_connections_per_device\x18\x05 \x01(\x05\x12\x16\n\x0erejected_total\x18\x06 \x01(\x05\x32\xae\x02\n\x14\x41\x63\x63\x65ssCommandService\x12P\n\x0bSendCommand\x12\x1f.xiaozhi.command.CommandRequest\x1a .xiaozhi.command.CommandResponse\x12[\n\x0eGetDeviceState\x12#.xiaozhi.command.DeviceStateRequest\x1a$.xiaozhi.command.DeviceStateResponse\x12g\n\x12GetConnectionStats\x12\'.xiaozhi.command.ConnectionStatsRequest\x1a(.xiaozhi.command.ConnectionStatsResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -39,6 +39,10 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_DEVICESTATEREQUEST']._serialized_end=246
   _globals['_DEVICESTATERESPONSE']._serialized_start=248
   _globals['_DEVICESTATERESPONSE']._serialized_end=311
-  _globals['_ACCESSCOMMANDSERVICE']._serialized_start=314
-  _globals['_ACCESSCOMMANDSERVICE']._serialized_end=511
+  _globals['_CONNECTIONSTATSREQUEST']._serialized_start=313
+  _globals['_CONNECTIONSTATSREQUEST']._serialized_end=357
+  _globals['_CONNECTIONSTATSRESPONSE']._serialized_start=360
+  _globals['_CONNECTIONSTATSRESPONSE']._serialized_end=513
+  _globals['_ACCESSCOMMANDSERVICE']._serialized_start=516
+  _globals['_ACCESSCOMMANDSERVICE']._serialized_end=818
 # @@protoc_insertion_point(module_scope)

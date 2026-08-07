@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
+import uuid
 
 import uvicorn
 from loguru import logger
@@ -11,6 +13,7 @@ from xiaozhi_common.constants import (
     ACCESS_HTTP_PORT,
     ACCESS_SERVICE,
     DEFAULT_PORTS,
+    MODEL_ADMIN_SERVICE,
     PREPROCESS_SERVICE,
 )
 from xiaozhi_common.grpc.client import GrpcClientPool
@@ -18,14 +21,38 @@ from xiaozhi_common.grpc.server import start_grpc_server
 from xiaozhi_common.nacos.client import create_nacos_client
 from xiaozhi_common.nacos.registry import NacosRegistry
 from xiaozhi_common.nacos.resolver import ServiceResolver
-from xiaozhi import audio_pb2_grpc, command_pb2_grpc, session_pb2_grpc
+from xiaozhi import admin_pb2, admin_pb2_grpc, audio_pb2_grpc, command_pb2_grpc, session_pb2_grpc
 from app.server.access_service import (
     AccessAudioServicer,
     AccessCommandServicer,
+    AccessConfigApplyServicer,
     AccessSessionServicer,
 )
 from app.ws.app_factory import create_app
+from app.ws.gateway_runtime import gateway_runtime
 from app.ws.manager import connection_manager
+
+
+def _pull_config_from_admin(pool: GrpcClientPool) -> None:
+    message_id = uuid.uuid4().hex
+    try:
+        stub = admin_pb2_grpc.ModelAdminServiceStub(pool.channel(MODEL_ADMIN_SERVICE))
+        resp = stub.GetConfig(
+            admin_pb2.GetConfigRequest(
+                message_id=message_id,
+                service_name=ACCESS_SERVICE,
+            ),
+            metadata=pool.metadata(message_id=message_id),
+            timeout=5,
+        )
+        if int(resp.code) != 0:
+            logger.warning(f"GetConfig from admin failed: {resp.msg}")
+            return
+        data = json.loads(resp.config_json or "{}")
+        if isinstance(data, dict) and data:
+            gateway_runtime.apply_config(data, reason="startup_pull")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"Startup config pull skipped: {exc}")
 
 
 def serve(config: BaseServerConfig) -> None:
@@ -43,7 +70,9 @@ def serve(config: BaseServerConfig) -> None:
 
     resolver = ServiceResolver(config, nacos)
     resolver.watch(PREPROCESS_SERVICE)
+    resolver.watch(MODEL_ADMIN_SERVICE)
     pool = GrpcClientPool(resolver)
+    _pull_config_from_admin(pool)
 
     def register(server):  # noqa: ANN001
         audio_pb2_grpc.add_AccessAudioServiceServicer_to_server(
@@ -54,6 +83,9 @@ def serve(config: BaseServerConfig) -> None:
         )
         session_pb2_grpc.add_SessionServiceServicer_to_server(
             AccessSessionServicer(), server
+        )
+        admin_pb2_grpc.add_ConfigApplyServiceServicer_to_server(
+            AccessConfigApplyServicer(), server
         )
 
     grpc_server = start_grpc_server(
@@ -67,7 +99,9 @@ def serve(config: BaseServerConfig) -> None:
         asyncio.set_event_loop(loop)
         connection_manager.set_loop(loop)
         logger.info(f"xiaozhi-access HTTP/WS on {http_port}, gRPC on {grpc_port}")
-        config_uv = uvicorn.Config(app, host="0.0.0.0", port=http_port, loop="asyncio", log_level="info")
+        config_uv = uvicorn.Config(
+            app, host="0.0.0.0", port=http_port, loop="asyncio", log_level="info"
+        )
         server = uvicorn.Server(config_uv)
         loop.run_until_complete(server.serve())
 

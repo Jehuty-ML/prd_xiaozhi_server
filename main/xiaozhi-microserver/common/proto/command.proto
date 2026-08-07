@@ -26,8 +26,22 @@ message DeviceStateResponse {
   string state = 3;
 }
 
-// Access command surface (listen state, device cmds)
+message ConnectionStatsRequest {
+  string message_id = 1;
+}
+
+message ConnectionStatsResponse {
+  int32 code = 1;
+  string msg = 2;
+  int32 active = 3;
+  int32 max_connections = 4;
+  int32 max_connections_per_device = 5;
+  int32 rejected_total = 6;
+}
+
+// Access command surface (listen state, device cmds, capacity)
 service AccessCommandService {
   rpc SendCommand(CommandRequest) returns (CommandResponse);
   rpc GetDeviceState(DeviceStateRequest) returns (DeviceStateResponse);
+  rpc GetConnectionStats(ConnectionStatsRequest) returns (ConnectionStatsResponse);
 }

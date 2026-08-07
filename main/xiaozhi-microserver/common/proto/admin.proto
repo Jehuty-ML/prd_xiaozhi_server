@@ -36,8 +36,26 @@ message HealthResponse {
   string detail_json = 4;
 }
 
+// Hot-update broadcast: model-admin pushes snapshot to peers (access first).
+message ApplyConfigRequest {
+  string message_id = 1;
+  string config_json = 2;
+  string reason = 3;
+}
+
+message ApplyConfigResponse {
+  int32 code = 1;
+  string msg = 2;
+  string result = 3;
+}
+
 service ModelAdminService {
   rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
   rpc ReloadConfig(ReloadConfigRequest) returns (ReloadConfigResponse);
   rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+// Implemented by peer services; model-admin is the gRPC client.
+service ConfigApplyService {
+  rpc ApplyConfig(ApplyConfigRequest) returns (ApplyConfigResponse);
 }
