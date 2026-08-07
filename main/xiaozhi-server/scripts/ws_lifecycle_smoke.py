@@ -81,13 +81,10 @@ _AUTH = SmokeAuth(enabled=False, source="unset")
 
 
 def resolve_auth_key_like_app(cfg: dict) -> str:
-    """与 app.py 一致：server.auth_key > manager-api.secret。"""
-    key = ((cfg.get("server") or {}).get("auth_key") or "").strip()
-    if not key or "你" in key:
-        key = ((cfg.get("manager-api") or {}).get("secret") or "").strip()
-    if not key or "你" in key:
-        return ""
-    return key
+    """与 app / config_loader.resolve_auth_key 一致（不自动生成 UUID）。"""
+    from config.config_loader import resolve_auth_key
+
+    return resolve_auth_key(cfg, allow_generate=False)
 
 
 async def resolve_smoke_auth(args) -> SmokeAuth:

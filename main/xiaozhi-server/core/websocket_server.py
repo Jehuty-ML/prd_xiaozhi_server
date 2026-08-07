@@ -251,6 +251,7 @@ class WebSocketServer:
         try:
             async with self.config_lock:
                 # 重新读取 data/.config.yaml + 拉取智控台，避免沿用内存里的旧 connection
+                prev_auth_key = (self.config.get("server") or {}).get("auth_key", "")
                 try:
                     new_config = await reload_config_from_api()
                 except RuntimeError:
@@ -258,6 +259,24 @@ class WebSocketServer:
                 if new_config is None:
                     self.logger.bind(tag=TAG).error("获取新配置失败")
                     return False
+                # 热更新不得把内存中有效 auth_key 清空（YAML 常未写死）
+                from config.config_loader import is_valid_auth_key, resolve_auth_key
+
+                server_cfg = new_config.get("server")
+                if not isinstance(server_cfg, dict):
+                    server_cfg = {}
+                    new_config["server"] = server_cfg
+                resolved_auth_key = resolve_auth_key(
+                    new_config,
+                    previous_key=prev_auth_key,
+                    allow_generate=False,
+                )
+                if not is_valid_auth_key(resolved_auth_key):
+                    self.logger.bind(tag=TAG).error(
+                        "热更新后 auth_key 无效且无可用回退，拒绝更新配置"
+                    )
+                    return False
+                server_cfg["auth_key"] = resolved_auth_key
                 self.logger.bind(tag=TAG).info(f"获取新配置成功")
                 conn_cfg = (new_config.get("server") or {}).get("connection") or {}
                 self.logger.bind(tag=TAG).info(
@@ -304,6 +323,20 @@ class WebSocketServer:
                         health_state.bind(config=self.config)
                     except Exception:
                         pass
+                # Redis 注册心跳仍持有启动 config；websocket 变更后须立刻刷新上报
+                try:
+                    from core.utils.health import health_state
+
+                    health_state.bind(config=self.config)
+                    registrar = health_state.dialogue_registrar
+                    if registrar is not None and hasattr(registrar, "refresh_config"):
+                        registrar.refresh_config(self.config)
+                        if hasattr(registrar, "push_heartbeat"):
+                            await registrar.push_heartbeat()
+                except Exception as e:
+                    self.logger.bind(tag=TAG).warning(
+                        f"同步 Dialogue 注册心跳配置失败: {e}"
+                    )
                 self.logger.bind(tag=TAG).info(
                     f"运行环境已同步: {self.environment}; "
                     f"auth={self.auth_enable}, whitelist_bypass={self.whitelist_bypass}, "
