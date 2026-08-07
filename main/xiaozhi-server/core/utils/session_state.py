@@ -7,8 +7,8 @@ DETECT：短生命周期唤醒相位，用于轨迹排障与「唤醒后空窗�
 ABORT 为事件而非状态（瞬时取消副作用）。
 
 高级参数 mode：默认 common；另有 play_only（仅播放）。
-全局 session_state.mode 由 manage-api 设定；智控台「通知更新配置」会向
-本 WS 实例全部在线设备广播并强制打断回 IDLE。
+全局 session_state.mode 由 manage-api 设定；智控台「通知更新配置」在
+mode 实际变化时向本 WS 实例在线设备广播，并强制打断回 IDLE。
 """
 
 from __future__ import annotations
@@ -462,7 +462,7 @@ async def detect_timeout_watchdog(conn: object):
 def clear_speak_status(conn: object) -> None:
     """TTS 结束或打断后清讲话态；已非 SPEAKING 时不触发 TTS_END。
 
-    若处于管理台广播会话，播完/打断后自动从 play_only 回到 common。
+    若处于管理台广播会话，播完/打断后恢复广播前的 mode（默认 common）。
     """
     sm: SessionStateMachine = conn.session_sm
     if sm.state == SessionState.SPEAKING:
@@ -473,7 +473,7 @@ def clear_speak_status(conn: object) -> None:
 
 
 def _finish_broadcast_speak(conn: object, *, detail: str = "") -> None:
-    """广播结束：退出 play_only，恢复 common。"""
+    """广播结束：退出临时 play_only，恢复广播前 mode。"""
     if not getattr(conn, "_broadcast_speak_active", False):
         return
     conn._broadcast_speak_active = False
@@ -539,7 +539,8 @@ async def apply_session_mode(
 ) -> bool:
     """将连接切换到指定 session_state.mode。
 
-    设备在线且 force_interrupt 时：强制打断当前对话/播放并 RESET 到 IDLE，再切 mode。
+    mode 未变化时只同步配置、不打断、不 reset。
+    mode 变化且设备在线、force_interrupt 时：打断当前对话/播放并 RESET 到 IDLE，再切 mode。
     """
     resolved = (mode or "").strip().lower()
     if resolved not in SESSION_MACHINE_PROFILES:
@@ -554,10 +555,15 @@ async def apply_session_mode(
         block["mode"] = resolved
 
     sm: SessionStateMachine = conn.session_sm
+    mode_changed = sm.mode != resolved
+    if not mode_changed:
+        # 同 mode 热更新（如无关配置刷新）不得打断进行中的对话
+        sync_legacy_flags(conn, sm.state)
+        return True
+
     need_interrupt = force_interrupt and (
         sm.state != SessionState.IDLE
         or getattr(conn, "client_is_speaking", False)
-        or sm.mode != resolved
     )
     closed = getattr(conn, "_closed", False)
     ws = getattr(conn, "websocket", None)
@@ -586,9 +592,10 @@ async def apply_session_mode(
 
 
 async def speak_broadcast_text(conn: object, text: str) -> bool:
-    """管理台广播播报：自动切 play_only → TTS → 播完/打断后回 common。
+    """管理台广播播报：自动切 play_only → TTS → 播完/打断后恢复原 mode。
 
-    无需事先改全局 session_state.mode（可保持 common）。
+    无需事先改全局 session_state.mode（可保持 common）；若原本已是
+    play_only，播完仍保持 play_only，不会被误恢复成 common。
     """
     content = (text or "").strip()
     if not content:
@@ -603,14 +610,34 @@ async def speak_broadcast_text(conn: object, text: str) -> bool:
     if ws is None or closed:
         return False
 
-    conn._broadcast_restore_mode = DEFAULT_SESSION_MODE
+    sm: SessionStateMachine = conn.session_sm
+    conn._broadcast_restore_mode = sm.mode or DEFAULT_SESSION_MODE
     # 先切 mode（内部可能 abort→clearSpeak）；标志要在之后再置，避免被清掉
     try:
-        ok_mode = await apply_session_mode(
-            conn, PLAY_ONLY_SESSION_MODE, force_interrupt=True
-        )
-        if not ok_mode:
-            return False
+        if sm.mode != PLAY_ONLY_SESSION_MODE:
+            ok_mode = await apply_session_mode(
+                conn, PLAY_ONLY_SESSION_MODE, force_interrupt=True
+            )
+            if not ok_mode:
+                conn._broadcast_restore_mode = None
+                return False
+        elif sm.state != SessionState.IDLE or getattr(
+            conn, "client_is_speaking", False
+        ):
+            # 已是 play_only：仍打断当前播报，播完后保持 play_only
+            try:
+                from core.handle.abortHandle import handleAbortMessage
+
+                await handleAbortMessage(conn)
+            except Exception:
+                conn.client_abort = True
+                if hasattr(conn, "clear_queues"):
+                    try:
+                        conn.clear_queues()
+                    except Exception:
+                        pass
+                sm.transition(SessionEvent.RESET, detail="broadcast_barge_in")
+                clear_speak_status(conn)
 
         conn._broadcast_speak_active = True
         conn.client_abort = False
