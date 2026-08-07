@@ -12,3 +12,5 @@ python-multipart>=0.0.9
 PyJWT>=2.8.0
 cryptography>=42.0.0
 prometheus-client>=0.20.0
+openai>=1.40.0
+pytest>=8.0.0

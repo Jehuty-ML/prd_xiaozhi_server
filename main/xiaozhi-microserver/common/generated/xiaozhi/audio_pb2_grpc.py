@@ -219,7 +219,7 @@ class AudioReceiverService:
 
 
 class AgentServiceStub:
-    """Agent: dialogue brain
+    """Agent: dialogue brain (phase-3 LLM / tools / device events)
     """
 
     def __init__(self, channel):
@@ -233,13 +233,35 @@ class AgentServiceStub:
                 request_serializer=audio__pb2.TextRequest.SerializeToString,
                 response_deserializer=audio__pb2.TextResponse.FromString,
                 _registered_method=True)
+        self.HandleDeviceEvent = channel.unary_unary(
+                '/xiaozhi.audio.AgentService/HandleDeviceEvent',
+                request_serializer=audio__pb2.DeviceEventRequest.SerializeToString,
+                response_deserializer=audio__pb2.DeviceEventResponse.FromString,
+                _registered_method=True)
+        self.Abort = channel.unary_unary(
+                '/xiaozhi.audio.AgentService/Abort',
+                request_serializer=audio__pb2.AgentAbortRequest.SerializeToString,
+                response_deserializer=audio__pb2.AgentAbortResponse.FromString,
+                _registered_method=True)
 
 
 class AgentServiceServicer:
-    """Agent: dialogue brain
+    """Agent: dialogue brain (phase-3 LLM / tools / device events)
     """
 
     def SendText(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def HandleDeviceEvent(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Abort(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -253,6 +275,16 @@ def add_AgentServiceServicer_to_server(servicer, server):
                     request_deserializer=audio__pb2.TextRequest.FromString,
                     response_serializer=audio__pb2.TextResponse.SerializeToString,
             ),
+            'HandleDeviceEvent': grpc.unary_unary_rpc_method_handler(
+                    servicer.HandleDeviceEvent,
+                    request_deserializer=audio__pb2.DeviceEventRequest.FromString,
+                    response_serializer=audio__pb2.DeviceEventResponse.SerializeToString,
+            ),
+            'Abort': grpc.unary_unary_rpc_method_handler(
+                    servicer.Abort,
+                    request_deserializer=audio__pb2.AgentAbortRequest.FromString,
+                    response_serializer=audio__pb2.AgentAbortResponse.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'xiaozhi.audio.AgentService', rpc_method_handlers)
@@ -262,7 +294,7 @@ def add_AgentServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class AgentService:
-    """Agent: dialogue brain
+    """Agent: dialogue brain (phase-3 LLM / tools / device events)
     """
 
     @staticmethod
@@ -282,6 +314,60 @@ class AgentService:
             '/xiaozhi.audio.AgentService/SendText',
             audio__pb2.TextRequest.SerializeToString,
             audio__pb2.TextResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def HandleDeviceEvent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/xiaozhi.audio.AgentService/HandleDeviceEvent',
+            audio__pb2.DeviceEventRequest.SerializeToString,
+            audio__pb2.DeviceEventResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Abort(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/xiaozhi.audio.AgentService/Abort',
+            audio__pb2.AgentAbortRequest.SerializeToString,
+            audio__pb2.AgentAbortResponse.FromString,
             options,
             channel_credentials,
             insecure,

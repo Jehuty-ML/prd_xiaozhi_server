@@ -4,7 +4,7 @@ setlocal
 set "ROOT=%~dp0"
 set "BASE=--env=dev --group_name=DEV_GROUP --disable_nacos --nacos_host=127.0.0.1 --nacos_port=8848"
 
-echo [INFO] Starting xiaozhi-microserver (phase-2 control plane + gateway)...
+echo [INFO] Starting xiaozhi-microserver (phase-3 agent LLM/tools)...
 echo [INFO] Nacos disabled by default; remove --disable_nacos when Nacos is available.
 echo ========================================
 
@@ -20,6 +20,7 @@ echo ========================================
 echo [SUCCESS] Launch commands sent.
 echo [TIPS] WS: ws://127.0.0.1:8103/xiaozhi/v1/?device-id=test-001
 echo [TIPS] OTA: http://127.0.0.1:8004/xiaozhi/ota/
-echo [TIPS] Smoke: python scripts\ws_smoke.py ^&^& python scripts\ota_smoke.py
+echo [TIPS] Smoke: python scripts\ws_smoke.py ^&^& python scripts\agent_smoke.py --mcp --iot --exit
+echo [TIPS] All tests: python scripts\run_tests.py
 echo.
 pause

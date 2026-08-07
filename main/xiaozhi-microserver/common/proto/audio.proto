@@ -73,6 +73,31 @@ message TtsAudioResponse {
   string result = 3;
 }
 
+message DeviceEventRequest {
+  string message_id = 1;
+  string client_id = 2;
+  string event_type = 3;  // mcp | iot
+  string payload_json = 4;
+}
+
+message DeviceEventResponse {
+  int32 code = 1;
+  string msg = 2;
+  string result = 3;
+}
+
+message AgentAbortRequest {
+  string message_id = 1;
+  string client_id = 2;
+  string reason = 3;
+}
+
+message AgentAbortResponse {
+  int32 code = 1;
+  string msg = 2;
+  string result = 3;
+}
+
 // Preprocess: uplink audio from access
 service AudioPreprocessService {
   rpc SendAudioChunk(AudioChunkRequest) returns (AudioChunkResponse);
@@ -84,9 +109,11 @@ service AudioReceiverService {
   rpc AsrRecognize(AsrRecognizeRequest) returns (AsrRecognizeResponse);
 }
 
-// Agent: dialogue brain
+// Agent: dialogue brain (phase-3 LLM / tools / device events)
 service AgentService {
   rpc SendText(TextRequest) returns (TextResponse);
+  rpc HandleDeviceEvent(DeviceEventRequest) returns (DeviceEventResponse);
+  rpc Abort(AgentAbortRequest) returns (AgentAbortResponse);
 }
 
 // Speaker: TTS

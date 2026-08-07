@@ -3,7 +3,12 @@ from __future__ import annotations
 from loguru import logger
 
 from xiaozhi_common.config import BaseServerConfig
-from xiaozhi_common.constants import AGENT_SERVICE, DEFAULT_PORTS, SPEAKER_SERVICE
+from xiaozhi_common.constants import (
+    ACCESS_SERVICE,
+    AGENT_SERVICE,
+    DEFAULT_PORTS,
+    SPEAKER_SERVICE,
+)
 from xiaozhi_common.grpc.client import GrpcClientPool
 from xiaozhi_common.grpc.server import start_grpc_server
 from xiaozhi_common.nacos.client import create_nacos_client
@@ -26,6 +31,7 @@ def serve(config: BaseServerConfig) -> None:
 
     resolver = ServiceResolver(config, nacos)
     resolver.watch(SPEAKER_SERVICE)
+    resolver.watch(ACCESS_SERVICE)
     pool = GrpcClientPool(resolver)
 
     def register(server):  # noqa: ANN001
@@ -34,7 +40,7 @@ def serve(config: BaseServerConfig) -> None:
     server = start_grpc_server(
         port=port, max_workers=config.rpc_max_connect, register_fn=register
     )
-    logger.info(f"{config.server_name} ready grpc={port}")
+    logger.info(f"{config.server_name} ready grpc={port} (phase-3 agent)")
     try:
         server.wait_for_termination()
     except KeyboardInterrupt:

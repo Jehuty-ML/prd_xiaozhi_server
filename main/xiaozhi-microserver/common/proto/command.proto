@@ -45,3 +45,20 @@ service AccessCommandService {
   rpc GetDeviceState(DeviceStateRequest) returns (DeviceStateResponse);
   rpc GetConnectionStats(ConnectionStatsRequest) returns (ConnectionStatsResponse);
 }
+
+message DeviceMessageRequest {
+  string message_id = 1;
+  string client_id = 2;
+  string json_text = 3;  // raw WS JSON frame (mcp / iot / ...)
+}
+
+message DeviceMessageResponse {
+  int32 code = 1;
+  string msg = 2;
+  string result = 3;
+}
+
+// Agent → Access: proxy MCP/IoT frames onto the device WebSocket
+service AccessDeviceProxyService {
+  rpc SendToDevice(DeviceMessageRequest) returns (DeviceMessageResponse);
+}

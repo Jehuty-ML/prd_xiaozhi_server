@@ -1,4 +1,4 @@
-"""Session DTO placeholders for phase-2 abort fan-out."""
+"""Session DTO for access + agent (phase-3 Session API uses these states)."""
 
 from __future__ import annotations
 

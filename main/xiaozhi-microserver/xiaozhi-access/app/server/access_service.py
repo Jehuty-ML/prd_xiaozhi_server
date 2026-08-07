@@ -52,6 +52,11 @@ class AccessCommandServicer(command_pb2_grpc.AccessCommandServiceServicer):
         client_id = request.client_id or getattr(context, "client_id", "")
         command = request.command or ""
         connection_manager.set_state(client_id, command)
+        # close_after_chat: mark meta; do not push a fake command frame to device
+        if command == "close_after_chat":
+            connection_manager.set_meta(client_id, "close_after_chat", True)
+            logger.info(f"Access close_after_chat client_id={client_id}")
+            return command_pb2.CommandResponse(code=0, msg="ok", result=command)
         frame = json.dumps(
             {"type": "command", "command": command, "payload": request.payload or ""},
             ensure_ascii=False,
@@ -118,3 +123,24 @@ class AccessConfigApplyServicer(admin_pb2_grpc.ConfigApplyServiceServicer):
             return admin_pb2.ApplyConfigResponse(
                 code=1, msg=str(exc), result=""
             )
+
+
+class AccessDeviceProxyServicer(command_pb2_grpc.AccessDeviceProxyServiceServicer):
+    """Agent → device MCP/IoT JSON frames (phase-3)."""
+
+    def SendToDevice(self, request, context):  # noqa: N802, ANN001
+        client_id = request.client_id or getattr(context, "client_id", "")
+        text = request.json_text or ""
+        if not text:
+            return command_pb2.DeviceMessageResponse(
+                code=1, msg="empty json_text", result=""
+            )
+        ok = connection_manager.send_text_threadsafe(client_id, text)
+        if not ok:
+            return command_pb2.DeviceMessageResponse(
+                code=1, msg="client not connected", result=""
+            )
+        logger.info(
+            f"DeviceProxy SendToDevice client_id={client_id} bytes={len(text)}"
+        )
+        return command_pb2.DeviceMessageResponse(code=0, msg="ok", result="delivered")

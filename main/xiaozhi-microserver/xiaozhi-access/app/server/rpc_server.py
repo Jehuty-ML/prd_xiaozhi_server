@@ -12,6 +12,7 @@ from xiaozhi_common.config import BaseServerConfig
 from xiaozhi_common.constants import (
     ACCESS_HTTP_PORT,
     ACCESS_SERVICE,
+    AGENT_SERVICE,
     DEFAULT_PORTS,
     MODEL_ADMIN_SERVICE,
     PREPROCESS_SERVICE,
@@ -26,6 +27,7 @@ from app.server.access_service import (
     AccessAudioServicer,
     AccessCommandServicer,
     AccessConfigApplyServicer,
+    AccessDeviceProxyServicer,
     AccessSessionServicer,
 )
 from app.ws.app_factory import create_app
@@ -71,6 +73,7 @@ def serve(config: BaseServerConfig) -> None:
     resolver = ServiceResolver(config, nacos)
     resolver.watch(PREPROCESS_SERVICE)
     resolver.watch(MODEL_ADMIN_SERVICE)
+    resolver.watch(AGENT_SERVICE)
     pool = GrpcClientPool(resolver)
     _pull_config_from_admin(pool)
 
@@ -86,6 +89,9 @@ def serve(config: BaseServerConfig) -> None:
         )
         admin_pb2_grpc.add_ConfigApplyServiceServicer_to_server(
             AccessConfigApplyServicer(), server
+        )
+        command_pb2_grpc.add_AccessDeviceProxyServiceServicer_to_server(
+            AccessDeviceProxyServicer(), server
         )
 
     grpc_server = start_grpc_server(

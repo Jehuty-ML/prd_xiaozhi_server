@@ -11,7 +11,7 @@ from fastapi import WebSocket
 from loguru import logger
 
 from xiaozhi import admin_pb2, admin_pb2_grpc, audio_pb2, audio_pb2_grpc
-from xiaozhi_common.constants import MODEL_ADMIN_SERVICE, PREPROCESS_SERVICE
+from xiaozhi_common.constants import AGENT_SERVICE, MODEL_ADMIN_SERVICE, PREPROCESS_SERVICE
 from xiaozhi_common.grpc.client import GrpcClientPool
 from app.ws.gateway_runtime import gateway_runtime
 from app.ws.manager import connection_manager
@@ -52,29 +52,69 @@ async def dispatch_text(
         await _handle_listen(pool, websocket, client_id, session_id, payload)
         return
     if msg_type == "abort":
-        await _handle_abort(websocket, client_id, session_id, payload)
+        await _handle_abort(pool, websocket, client_id, session_id, payload)
         return
     if msg_type == "server":
         await _handle_server(pool, websocket, payload)
         return
     if msg_type in ("iot", "mcp"):
-        # Phase 3: proxy via agent; ack for protocol compatibility.
-        await websocket.send_text(
-            json.dumps(
-                {
-                    "type": msg_type,
-                    "status": "accepted",
-                    "message": "queued for phase-3 agent proxy",
-                    "session_id": session_id,
-                },
-                ensure_ascii=False,
-            )
-        )
+        await _forward_device_event(pool, websocket, client_id, session_id, msg_type, payload)
         return
     if "text" in payload:
         await _inject_text(pool, client_id, str(payload["text"]))
         return
     logger.debug(f"Unhandled WS text type={msg_type!r} client_id={client_id}")
+
+
+async def _forward_device_event(
+    pool: GrpcClientPool,
+    websocket: WebSocket,
+    client_id: str,
+    session_id: str,
+    event_type: str,
+    payload: dict[str, Any],
+) -> None:
+    message_id = uuid.uuid4().hex
+
+    def _call():
+        stub = audio_pb2_grpc.AgentServiceStub(pool.channel(AGENT_SERVICE))
+        return stub.HandleDeviceEvent(
+            audio_pb2.DeviceEventRequest(
+                message_id=message_id,
+                client_id=client_id,
+                event_type=event_type,
+                payload_json=json.dumps(payload, ensure_ascii=False),
+            ),
+            metadata=pool.metadata(client_id, message_id),
+            timeout=15,
+        )
+
+    try:
+        resp = await asyncio.to_thread(_call)
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": event_type,
+                    "status": "ok" if int(resp.code) == 0 else "error",
+                    "message": resp.result or resp.msg,
+                    "session_id": session_id,
+                },
+                ensure_ascii=False,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"DeviceEvent forward failed: {exc}")
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": event_type,
+                    "status": "error",
+                    "message": str(exc),
+                    "session_id": session_id,
+                },
+                ensure_ascii=False,
+            )
+        )
 
 
 async def _handle_hello(
@@ -123,6 +163,7 @@ async def _handle_listen(
 
 
 async def _handle_abort(
+    pool: GrpcClientPool,
     websocket: WebSocket,
     client_id: str,
     session_id: str,
@@ -130,7 +171,6 @@ async def _handle_abort(
 ) -> None:
     reason = payload.get("reason") or "client_abort"
     connection_manager.set_state(client_id, "aborted")
-    # Local stop frame; full fan-out to preprocess/agent/speaker is later phase.
     await websocket.send_text(
         json.dumps(
             {
@@ -142,6 +182,23 @@ async def _handle_abort(
             ensure_ascii=False,
         )
     )
+    # Fan-out abort to agent (cancel in-flight chat / tools)
+    message_id = uuid.uuid4().hex
+
+    def _call():
+        stub = audio_pb2_grpc.AgentServiceStub(pool.channel(AGENT_SERVICE))
+        return stub.Abort(
+            audio_pb2.AgentAbortRequest(
+                message_id=message_id, client_id=client_id, reason=str(reason)
+            ),
+            metadata=pool.metadata(client_id, message_id),
+            timeout=5,
+        )
+
+    try:
+        await asyncio.to_thread(_call)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"Agent abort fan-out skipped: {exc}")
     logger.info(f"WS abort client_id={client_id} session={session_id} reason={reason}")
 
 

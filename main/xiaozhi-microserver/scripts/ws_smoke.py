@@ -1,4 +1,4 @@
-﻿"""Phase-2 smoke: hello handshake + listen/detect text path through stub pipeline."""
+﻿"""Phase-3 smoke: hello + listen/detect through agent LLM pipeline + optional abort."""
 
 from __future__ import annotations
 
