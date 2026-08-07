@@ -83,6 +83,11 @@
 | `server.resilience.llm_fallback` | （空） | 备用 LLM 配置名（`LLM` 段键） |
 | `server.resilience.tts_fallback_audio` | `config/assets/wakeup_words_short.wav` | TTS/降级预置音路径 |
 | `server.resilience.use_tts_fallback_on_degrade` | true | 降级是否优先播预置音 |
+| `server.registry.enabled` | true | Dialogue Redis 注册心跳；OTA 优先选存活实例 |
+| `server.registry.instance_id` | （空） | 可选固定实例 ID；空则自动生成 |
+| `server.registry.heartbeat_interval_seconds` | 30 | 心跳间隔（秒） |
+| `server.registry.heartbeat_ttl_seconds` | 60 | 心跳 TTL（秒），过期=假存活 |
+| `server.registry.redis.host` / `port` / `db` | 127.0.0.1 / 6379 / **0** | 须与 manager-api 同库（勿用熔断 db=1） |
 
 切换：用 `data/.config.yaml.remote.bak` 覆盖为 `data/.config.yaml`，填 `manager-api.url` / `secret`，重启 manager-api（执行 Liquibase）与 xiaozhi-server。  
 改参后可在【服务端管理】点「更新配置」；新上限对后续新连接生效。  
@@ -332,6 +337,54 @@ server:
 
 ---
 
+## 6.5 已落地：Dialogue 注册心跳（多实例发现）
+
+对齐 Java `RedisDialogueServerRegistry`：每个 `xiaozhi-server` 进程向 **与 manager-api 同库的 Redis** 注册自身 WebSocket 地址并定时心跳；OTA 优先从存活实例中随机选路，挂掉的实例因心跳 TTL 过期不再被抽中。
+
+### 配置（`server.registry`）
+
+智控台模式：在【参数管理】改 `server.registry.*`（见 §4.2），经 `/config/server-base` 下发。  
+本地模式：写在 `data/.config.yaml` 的 `server.registry`。
+
+```yaml
+server:
+  registry:
+    enabled: true          # 多实例务必开启；单机无 Redis 可 false
+    # instance_id: dialogue-1
+    heartbeat_interval_seconds: 30
+    heartbeat_ttl_seconds: 60
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      password: ""
+      db: 0                 # 必须与 manager-api 同库；勿用 resilience.redis.db=1
+```
+
+也可用环境变量 `XIAOZHI_INSTANCE_ID` 固定实例 ID。  
+每个实例的 `server.websocket` 应配成**自己的**对外地址（不要把多机地址用 `;` 塞进同一进程）。
+
+### Redis key
+
+| Key | 说明 |
+|-----|------|
+| `xiaozhi:dialogue:servers` | Hash，field=`instanceId`，value=JSON |
+| `xiaozhi:dialogue:heartbeat:{instanceId}` | String `"1"`，TTL=`heartbeat_ttl_seconds` |
+
+### 行为
+
+| 场景 | 行为 |
+|------|------|
+| 进程启动且 `enabled=true` | 注册 + 每 30s 心跳 |
+| 进程退出 | 注销 Hash 字段与心跳 key |
+| 心跳中断 > TTL | manager-api OTA 懒清理僵尸，不再选该实例 |
+| 无存活注册实例 | OTA 回退静态 `server.websocket`（`;` 分隔随机） |
+
+相关代码：`core/utils/dialogue_registry.py`、`app.py`；manager-api：`RedisDialogueServerRegistry`、`DeviceServiceImpl` OTA 选路。
+
+单测：`tests/test_dialogue_registry.py`
+
+---
+
 ## 7. 如何验证
 
 1. **启动日志**应出现类似：  
@@ -345,6 +398,7 @@ server:
 5. **重复触发关闭**（客户端断 + 服务端 finally）：不应出现成片二次清理异常
 6. **curl 指标**：`curl http://127.0.0.1:8003/metrics | findstr xiaozhi`
 7. **降级话术**：人为让 ASR/LLM 失败时，设备应听到 `server.resilience.*` 配置的短句，且 speaking 状态能正常 stop（日志含 `降级播报` / `会话降级`）
+8. **注册心跳**：开启 `server.registry.enabled` 后启动日志含 `Dialogue 已注册到 Redis`；manager-api OTA GET 显示 `已注册存活实例：N`；停掉某实例约 60s 后 N 减少且不再被 OTA 抽中
 
 ---
 
@@ -355,9 +409,10 @@ server:
 仍可按需补齐（与拆分并行即可）：
 
 1. **真 readiness**：区分 liveness / readiness（依赖、队列、连接水位）——拆成多服务后更有价值
-2. **网关单测（可选）**：连接准入/回收与限流；韧性已有 `tests/test_resilience.py`
+2. **网关单测（可选）**：连接准入/回收与限流；韧性已有 `tests/test_resilience.py`；注册已有 `tests/test_dialogue_registry.py`
 3. **安全收尾（可选）**：生产环境收紧设备白名单免检策略
 4. **adapter 失败语义（渐进）**：各家 ASR/TTS/LLM 内源统一抛 `UpstreamError`（关键路径已接好）
+5. **注册增强（可选）**：按连接水位加权选路、跨实例踢线（Java 侧有 device→instance 亲和可参考）
 
 不做：OTel / SkyWalking（已有 Prometheus；跨服务排障痛点再加）
 

@@ -10,6 +10,7 @@ from core.http_server import SimpleHttpServer
 from core.websocket_server import WebSocketServer
 from core.utils.util import check_ffmpeg_installed
 from core.utils.gc_manager import get_gc_manager
+from core.utils.dialogue_registry import DialogueServerRegistrar
 
 TAG = __name__
 logger = setup_logging()
@@ -67,6 +68,10 @@ async def main():
     # 启动全局GC管理器（5分钟清理一次）
     gc_manager = get_gc_manager(interval_seconds=300)
     await gc_manager.start()
+
+    # Dialogue 多实例注册心跳（可选；需 Redis，与 manager-api 同库）
+    dialogue_registrar = DialogueServerRegistrar(config)
+    await dialogue_registrar.start()
 
     # 启动 WebSocket 服务器
     ws_server = WebSocketServer(config)
@@ -138,6 +143,12 @@ async def main():
     except asyncio.CancelledError:
         print("任务被取消，清理资源中...")
     finally:
+        # 先注销注册中心，避免 OTA 继续抽到本实例
+        try:
+            await dialogue_registrar.stop()
+        except Exception as e:
+            logger.bind(tag=TAG).warning(f"Dialogue 注销异常: {e}")
+
         # 停止全局GC管理器
         await gc_manager.stop()
 
