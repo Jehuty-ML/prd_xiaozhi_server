@@ -11,6 +11,7 @@ from core.utils import metrics as metrics_mod
 from core.utils.util import audio_to_data
 from core.providers.tts.dto.dto import SentenceType
 from core.utils.audioRateController import AudioRateController
+from core.utils.session_state import SessionEvent
 
 TAG = __name__
 # 音频帧时长（毫秒）
@@ -320,6 +321,7 @@ async def send_stt_message(conn: "ConnectionHandler", text):
     end_prompt_str = conn.config.get("end_prompt", {}).get("prompt")
     if end_prompt_str and end_prompt_str == text:
         await send_tts_message(conn, "start")
+        conn.transition_session(SessionEvent.TTS_START, detail="end_prompt_tts_start")
         return
 
     # 解析JSON格式，提取实际的用户说话内容
@@ -342,8 +344,8 @@ async def send_stt_message(conn: "ConnectionHandler", text):
         json.dumps({"type": "stt", "text": stt_text, "session_id": conn.session_id})
     )
     await send_tts_message(conn, "start")
-    # 发送start消息后客户端状态会处于说话中状态，同步服务端状态
-    conn.client_is_speaking = True
+    # 发送 start 后客户端进入说话态；主状态机以 TTS_START 进入 SPEAKING
+    conn.transition_session(SessionEvent.TTS_START, detail="tts_protocol_start")
 
 
 async def send_display_message(conn: "ConnectionHandler", text):

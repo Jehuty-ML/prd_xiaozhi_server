@@ -45,6 +45,17 @@ from core.utils.prompt_manager import PromptManager
 from core.utils.voiceprint_provider import VoiceprintProvider
 from core.utils import textUtils
 from core.utils import metrics as metrics_mod
+from core.utils.session_state import (
+    SessionEvent,
+    SessionState,
+    SessionStateMachine,
+    arm_detect_timeout,
+    cancel_detect_timeout,
+    clear_speak_status,
+    detect_timeout_watchdog,
+    enter_detect as session_enter_detect,
+    transition_session as session_transition,
+)
 from core.utils.resilience import (
     UpstreamError,
     UpstreamKind,
@@ -128,11 +139,19 @@ class ConnectionHandler:
         self.audio_format = "opus"
         self.sample_rate = 24000  # 默认采样率，从客户端 hello 消息中动态更新
 
-        # 客户端状态相关
+        # 客户端状态相关（主状态见 session_sm；布尔字段为兼容旧逻辑的镜像）
         self.client_abort = False
         self.client_is_speaking = False
         self.client_listen_mode = "auto"
         self.client_aec = False  # 是否启用了服务端AEC
+        self.session_sm = SessionStateMachine(
+            session_id=self.session_id,
+            initial=SessionState.IDLE,
+            logger=self.logger.bind(tag="session_state"),
+        )
+        self.just_woken_up = False
+        self.detect_entered_at = 0.0
+        self._detect_timeout_task = None
 
         # 线程任务相关
         self.loop = None  # 在 handle_connection 中获取运行中的事件循环
@@ -693,6 +712,7 @@ class ConnectionHandler:
                 self.config.get("selected_module", {})
             )
             self.logger = create_connection_logger(self.selected_module_str)
+            self.session_sm.set_logger(self.logger.bind(tag="session_state"))
 
             """初始化组件"""
             if self.config.get("prompt") is not None:
@@ -1933,9 +1953,32 @@ class ConnectionHandler:
             except Exception:
                 pass
 
+    def transition_session(
+        self,
+        event,
+        *,
+        detail: str = "",
+        force: bool = False,
+    ) -> bool:
+        """统一状态转移入口：合法则改主状态并同步 legacy 布尔字段。"""
+        return session_transition(self, event, detail=detail, force=force)
+
+    def enter_detect(self, detail: str = "") -> bool:
+        """进入唤醒 DETECT 相位，并开启空窗超时。"""
+        return session_enter_detect(self, detail=detail)
+
+    def _cancel_detect_timeout(self) -> None:
+        cancel_detect_timeout(self)
+
+    def _arm_detect_timeout(self) -> None:
+        arm_detect_timeout(self)
+
+    async def _detect_timeout_watchdog(self):
+        await detect_timeout_watchdog(self)
+
     def clearSpeakStatus(self):
-        self.client_is_speaking = False
-        self.logger.bind(tag=TAG).debug(f"清除服务端讲话状态")
+        clear_speak_status(self)
+        self.logger.bind(tag=TAG).debug("清除服务端讲话状态")
 
     async def _cancel_tracked_tasks(self):
         """取消并等待本会话登记的全部 asyncio 任务。"""
@@ -1960,6 +2003,13 @@ class ConnectionHandler:
                 and self.vad_resume_task not in tasks
             ):
                 tasks.append(self.vad_resume_task)
+        if hasattr(self, "_detect_timeout_task") and self._detect_timeout_task:
+            if (
+                not self._detect_timeout_task.done()
+                and self._detect_timeout_task is not current
+                and self._detect_timeout_task not in tasks
+            ):
+                tasks.append(self._detect_timeout_task)
 
         if not tasks:
             self._tracked_tasks.discard(current)
