@@ -54,6 +54,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # GHCR 要求镜像路径全小写（owner 含大写字母时 github.repository 会失败）
+      - name: Set lowercase image name
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
       - name: Extract version from tag
         id: get_version
         run: |
@@ -73,7 +77,7 @@ jobs:
           file: Dockerfile-server
           push: true
           tags: |
-            ${{ env.IS_VERSION == 'true' && format('ghcr.io/{0}:server_{1},ghcr.io/{0}:server_latest', github.repository, env.VERSION) || format('ghcr.io/{0}:server_latest', github.repository) }}
+            ${{ env.IS_VERSION == 'true' && format('{0}:server_{1},{0}:server_latest', env.IMAGE_NAME, env.VERSION) || format('{0}:server_latest', env.IMAGE_NAME) }}
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -88,7 +92,7 @@ jobs:
           file: Dockerfile-web
           push: true
           tags: |
-            ${{ env.IS_VERSION == 'true' && format('ghcr.io/{0}:web_{1},ghcr.io/{0}:web_latest', github.repository, env.VERSION) || format('ghcr.io/{0}:web_latest', github.repository) }}
+            ${{ env.IS_VERSION == 'true' && format('{0}:web_{1},{0}:web_latest', env.IMAGE_NAME, env.VERSION) || format('{0}:web_latest', env.IMAGE_NAME) }}
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max

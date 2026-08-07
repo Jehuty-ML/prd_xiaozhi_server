@@ -30,13 +30,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # GHCR 要求镜像路径全小写（owner 含大写字母时 github.repository 会失败）
+      - name: Set lowercase image name
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
       - name: Build and push server-base
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile-server-base
           push: true
-          tags: ghcr.io/${{ github.repository }}:server-base
+          tags: ${{ env.IMAGE_NAME }}:server-base
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha,scope=server-base
           cache-to: type=gha,mode=max,scope=server-base
@@ -46,4 +50,4 @@ jobs:
       - name: Output image info
         run: |
           echo "✅ Base image built and pushed successfully!"
-          echo "📦 Tag: ghcr.io/${{ github.repository }}:server-base"
+          echo "📦 Tag: ${IMAGE_NAME}:server-base"
