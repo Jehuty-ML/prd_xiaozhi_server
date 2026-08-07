@@ -156,7 +156,7 @@ Spearheaded by Professor Siyuan Liu's Team (South China University of Technology
 1、本项目为开源软件，本软件与对接的任何第三方API服务商（包括但不限于语音识别、大模型、语音合成等平台）均不存在商业合作关系，不为其服务质量及资金安全提供任何形式的担保。
 建议使用者优先选择持有相关业务牌照的服务商，并仔细阅读其服务协议及隐私政策。本软件不托管任何账户密钥、不参与资金流转、不承担充值资金损失风险。
 
-2、本分支已做生产级加固；按[《生产部署》](./docs/Production.md)配置后可用于自托管生产；默认开发配置勿公网暴露。
+2、本分支已做生产级加固；按[《生产部署》](./docs/Production.md)配置后可用于自托管生产（**第六期起主运行时为** [`main/xiaozhi-microserver`](./main/xiaozhi-microserver)）；默认开发配置勿公网暴露。历史单体 `xiaozhi-server` 已退役，见其 `RETIRED.md`。
 
 ---
 

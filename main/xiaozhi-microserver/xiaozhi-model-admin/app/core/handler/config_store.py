@@ -96,6 +96,8 @@ def merge_api_config(
         "health",
         "name",
         "phase",
+        "resilience",
+        "admin",
     ):
         if api_server.get(key) is not None:
             merged_server[key] = api_server.get(key)
@@ -109,7 +111,7 @@ def merge_api_config(
             or "development"
         )
 
-    for section in ("connection", "metrics", "health"):
+    for section in ("connection", "metrics", "health", "resilience", "admin"):
         merged_section: dict = {}
         if isinstance(default_server.get(section), dict):
             merged_section.update(default_server[section])

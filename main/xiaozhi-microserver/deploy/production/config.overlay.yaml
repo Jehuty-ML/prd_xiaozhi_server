@@ -1,0 +1,43 @@
+# 生产叠加配置（xiaozhi-microserver）
+# 由 docker-compose.prod.yml 挂载，覆盖主线 config.yaml 中同名项
+# 不修改仓库内 config.yaml 的 development 默认
+
+server:
+  environment: production
+  phase: 6
+  # 部署后改成设备可达地址（公网用 wss/https）
+  # websocket: wss://voice.example.com/xiaozhi/v1/
+  # vision_explain: https://voice.example.com/mcp/vision/explain
+  auth:
+    enabled: true
+    allow_insecure_disable: false
+    allow_whitelist_bypass: false
+    devices_allowlist_only: false
+    allowed_devices: []
+  # 控制面门禁：/config /config/reload /broadcast_speak 需 Bearer / X-Admin-Token
+  admin:
+    require_auth: true
+    # token: "replace-with-long-random-secret"
+  health:
+    enabled: true
+    liveness_path: /health
+    readiness_path: /ready
+  metrics:
+    enabled: true
+    path: /metrics
+  connection:
+    max_connections: 200
+    max_connections_per_device: 2
+  resilience:
+    enabled: true
+    grpc_timeout_seconds: 30
+    asr_timeout_seconds: 15
+    llm_timeout_seconds: 90
+    tts_timeout_seconds: 60
+    max_retries: 2
+    retry_delay_seconds: 0.5
+    circuit_failure_threshold: 5
+    circuit_open_seconds: 30
+
+# 可选：固定 auth_key（生产建议随机长串；同时可用作 admin token）
+# server.auth_key: "replace-with-long-random-secret"

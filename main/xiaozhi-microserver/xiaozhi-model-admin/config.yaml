@@ -24,6 +24,20 @@ server:
   health:
     liveness_path: /health
     readiness_path: /ready
+  # Phase-6 control-plane gate (auto-on in production)
+  admin:
+    require_auth: false
+    token: ""
+  resilience:
+    enabled: true
+    grpc_timeout_seconds: 30
+    asr_timeout_seconds: 15
+    llm_timeout_seconds: 90
+    tts_timeout_seconds: 60
+    max_retries: 2
+    retry_delay_seconds: 0.5
+    circuit_failure_threshold: 5
+    circuit_open_seconds: 30
 
 xiaozhi:
   type: hello

@@ -16,6 +16,12 @@ from app.providers.llm import LLMProviderBase
 from app.providers.memory import MemoryProviderBase
 from app.tools.handler import ToolHandler
 from app.tools.register import Action, ActionResponse
+from xiaozhi_common.resilience import (
+    UpstreamError,
+    UpstreamKind,
+    call_with_resilience,
+    get_fallback_text,
+)
 
 _SENTENCE_END = re.compile(r"([。！？!?；;\n])")
 
@@ -136,31 +142,58 @@ class ChatEngine:
         response_chunks: List[str] = []
 
         try:
-            if functions:
-                stream = self.llm.response_with_functions(
-                    session.session_id, dialogue, functions
-                )
-                for content, tools_call in stream:
-                    if session.client_abort:
-                        break
-                    if content:
-                        content_arguments += content
-                        if not tool_call_flag:
+            def _consume():
+                nonlocal tool_call_flag, content_arguments
+                if functions:
+                    stream = self.llm.response_with_functions(
+                        session.session_id, dialogue, functions
+                    )
+                    for content, tools_call in stream:
+                        if session.client_abort:
+                            break
+                        if content:
+                            content_arguments += content
+                            if not tool_call_flag:
+                                response_chunks.append(content)
+                                speaker.feed(content)
+                        if tools_call:
+                            tool_call_flag = True
+                            _merge_tool_calls(tool_calls_list, tools_call)
+                else:
+                    for content in self.llm.response(session.session_id, dialogue):
+                        if session.client_abort:
+                            break
+                        if content:
                             response_chunks.append(content)
                             speaker.feed(content)
-                    if tools_call:
-                        tool_call_flag = True
-                        _merge_tool_calls(tool_calls_list, tools_call)
-            else:
-                for content in self.llm.response(session.session_id, dialogue):
-                    if session.client_abort:
-                        break
-                    if content:
-                        response_chunks.append(content)
-                        speaker.feed(content)
+
+            call_with_resilience(
+                "llm",
+                _consume,
+                config=self.config,
+                provider=type(self.llm).__name__,
+                max_retries=0,
+            )
+        except UpstreamError as exc:
+            logger.warning(f"LLM upstream failed: {exc}")
+            try:
+                from xiaozhi_common import metrics as metrics_mod
+
+                metrics_mod.observe_degraded("llm", exc.kind.value)
+            except Exception:  # noqa: BLE001
+                pass
+            fallback = get_fallback_text(self.config, "llm", exc.kind)
+            speaker.feed(fallback)
+            speaker.flush()
+            if not session.client_abort:
+                session.speak_end()
+            session.dialogue.put(Message(role="assistant", content=fallback))
+            return fallback
         except Exception as exc:  # noqa: BLE001
             logger.exception(f"LLM failed: {exc}")
-            fallback = "抱歉，我这边刚才走神了，请再说一次。"
+            fallback = get_fallback_text(
+                self.config, "llm", UpstreamKind.UNAVAILABLE
+            )
             speaker.feed(fallback)
             speaker.flush()
             if not session.client_abort:

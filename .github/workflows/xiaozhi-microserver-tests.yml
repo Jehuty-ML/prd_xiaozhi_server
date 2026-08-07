@@ -1,0 +1,41 @@
+name: xiaozhi-microserver tests
+
+on:
+  push:
+    paths:
+      - "main/xiaozhi-microserver/**"
+      - ".github/workflows/xiaozhi-microserver-tests.yml"
+      - ".github/workflows/docker-image.yml"
+  pull_request:
+    paths:
+      - "main/xiaozhi-microserver/**"
+      - ".github/workflows/xiaozhi-microserver-tests.yml"
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    name: Microserver unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: main/xiaozhi-microserver
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Generate proto
+        run: python common/generate_proto.py
+
+      - name: Run unit tests
+        run: python scripts/run_tests.py --unit-only

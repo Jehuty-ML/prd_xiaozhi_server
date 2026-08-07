@@ -4,13 +4,14 @@ import json
 import uuid
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Response, WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from xiaozhi import audio_pb2, audio_pb2_grpc
 from xiaozhi_common.auth import AuthenticationError
 from xiaozhi_common.constants import PREPROCESS_SERVICE
 from xiaozhi_common.grpc.client import GrpcClientPool
+from xiaozhi_common import metrics as metrics_mod
 from xiaozhi_common.runtime_env import (
     allow_query_authorization,
     is_device_permitted,
@@ -23,15 +24,20 @@ from app.ws.protocol import dispatch_text
 
 
 def create_app(pool: GrpcClientPool) -> FastAPI:
-    app = FastAPI(title="xiaozhi-access", version="0.2.0")
+    app = FastAPI(title="xiaozhi-access", version="0.6.0")
+
+    def _sync_gauges() -> None:
+        reg = gateway_runtime.registry
+        metrics_mod.set_ws_gauges(reg.active_count, reg.limits.max_connections)
 
     @app.get("/health")
     async def health():
         reg = gateway_runtime.registry
+        _sync_gauges()
         return {
             "status": "ok",
             "service": "xiaozhi-access",
-            "phase": 2,
+            "phase": 6,
             "active_connections": reg.active_count,
             "max_connections": reg.limits.max_connections,
             "rejected_total": reg.rejected_total,
@@ -40,6 +46,7 @@ def create_app(pool: GrpcClientPool) -> FastAPI:
     @app.get("/ready")
     async def ready():
         reg = gateway_runtime.registry
+        _sync_gauges()
         at_capacity = reg.active_count >= reg.limits.max_connections
         payload = {
             "status": "not_ready" if at_capacity else "ready",
@@ -52,6 +59,14 @@ def create_app(pool: GrpcClientPool) -> FastAPI:
 
             return JSONResponse(payload, status_code=503)
         return payload
+
+    @app.get("/metrics")
+    async def metrics():
+        _sync_gauges()
+        return Response(
+            content=metrics_mod.render_latest(),
+            media_type=metrics_mod.CONTENT_TYPE_LATEST,
+        )
 
     @app.websocket("/xiaozhi/v1/")
     @app.websocket("/ws")
@@ -87,6 +102,7 @@ async def _handle_websocket(pool: GrpcClientPool, websocket: WebSocket) -> None:
         acquired = True
     except ConnectionRejected as exc:
         logger.warning(f"WS rejected device={device_id}: {exc.reason}")
+        metrics_mod.observe_ws_rejected()
         try:
             await websocket.close(code=exc.close_code, reason=exc.reason[:120])
         except Exception:  # noqa: BLE001
@@ -95,12 +111,22 @@ async def _handle_websocket(pool: GrpcClientPool, websocket: WebSocket) -> None:
 
     # Prefer device-id as routing key when present (matches OTA/device identity).
     bind_id = device_id or client_id
-    connection_manager.bind(
-        bind_id, websocket, session_id=session_id, device_id=device_id
+    previous_ws = connection_manager.bind(
+        bind_id,
+        websocket,
+        session_id=session_id,
+        device_id=device_id,
+        alias_id=client_id if client_id and client_id != bind_id else "",
     )
-    # Also index by client_id if different, for dual-header lookups.
-    if client_id and client_id != bind_id:
-        connection_manager.set_meta(bind_id, "client_id", client_id)
+    if previous_ws is not None:
+        try:
+            await previous_ws.close(code=1000, reason="replaced by new connection")
+        except Exception:  # noqa: BLE001
+            pass
+    metrics_mod.set_ws_gauges(
+        gateway_runtime.registry.active_count,
+        gateway_runtime.registry.limits.max_connections,
+    )
 
     # Push protocol hello so clients that do not send hello still get session_id.
     welcome = gateway_runtime.welcome_message(session_id)
@@ -129,6 +155,10 @@ async def _handle_websocket(pool: GrpcClientPool, websocket: WebSocket) -> None:
         connection_manager.unbind(websocket)
         if acquired:
             await gateway_runtime.registry.release(session_id)
+        metrics_mod.set_ws_gauges(
+            gateway_runtime.registry.active_count,
+            gateway_runtime.registry.limits.max_connections,
+        )
 
 
 def _extract_ids(websocket: WebSocket) -> tuple[str, str]:
@@ -214,6 +244,7 @@ async def _handle_audio(pool: GrpcClientPool, client_id: str, data: bytes) -> No
     fmt = "opus"
     logger.debug(f"WS audio uplink client_id={client_id} bytes={len(data)}")
     stub = audio_pb2_grpc.AudioPreprocessServiceStub(pool.channel(PREPROCESS_SERVICE))
+    timeout = pool.default_timeout("grpc")
 
     def _call():
         return stub.SendAudioChunk(
@@ -226,9 +257,15 @@ async def _handle_audio(pool: GrpcClientPool, client_id: str, data: bytes) -> No
                 listen_mode=listen_mode,
             ),
             metadata=pool.metadata(client_id, message_id),
-            timeout=30,
+            timeout=timeout,
         )
 
-    resp = await asyncio.to_thread(_call)
+    try:
+        resp = await asyncio.to_thread(
+            lambda: pool.call("preprocess", _call, provider="SendAudioChunk")
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Preprocess uplink failed client_id={client_id}: {exc}")
+        return
     if resp.result:
         logger.info(f"Preprocess done client_id={client_id} result={resp.result!r}")

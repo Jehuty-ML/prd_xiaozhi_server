@@ -1,4 +1,5 @@
-﻿# Phase-1 local compose (no Nacos). Use --peer for cross-container discovery.
+﻿# Phase-6 local compose (no Nacos). Use --peer for cross-container discovery.
+# Production: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 services:
   xiaozhi-model-admin:
     image: python:3.12-slim

@@ -1,6 +1,6 @@
 ﻿# xiaozhi-microserver
 
-将开源单体 [`xiaozhi-server`](../xiaozhi-server) 按 Nacos + gRPC 微服务架构拆分后的实现（**第五期：VAD / ASR — preprocess 分句 + receiver 识别 + AEC 参考音 + listen 对齐**）。
+将开源单体 [`xiaozhi-server`](../xiaozhi-server) 按 Nacos + gRPC 微服务架构拆分后的实现（**第六期：收口 — 韧性 / 指标 / 连接上限 / 生产 compose / 门禁；单体退役**）。
 
 > 参考架构：仓库旁 `micro_service` 的进程划分与通信方式。  
 > 命名：全部使用 **xiaozhi** 语义，不引入专有业务名词。
@@ -16,19 +16,19 @@
 | `xiaozhi-audio-receiver` | `xiaozhi-audio-receiver-grpc-service` | gRPC **50055** | ASR：PCM → 文本（含声纹扩展位） |
 | `xiaozhi-model-admin` | `xiaozhi-model-admin-grpc-service` | HTTP **8004** / gRPC **50056** | 配置 / 热更新广播 / manager-api 对接 / OTA·视觉·health·metrics；`broadcast_speak` 控制面 |
 
-公共库：`common/xiaozhi_common`（配置、Nacos、gRPC、session DTO、auth / runtime_env）+ `common/proto`（统一契约）。
+公共库：`common/xiaozhi_common`（配置、Nacos、gRPC、session DTO、auth / runtime_env / **resilience** / **metrics**）+ `common/proto`（统一契约）。
 
-> 并存说明：原单体常用 HTTP `8003`，本仓库 access 默认用 **8103**，避免与仍在运行的 `xiaozhi-server` 冲突。删除单体后可改回 8003。
+> 并存说明：原单体常用 HTTP `8003`，本仓库 access 默认用 **8103**。删除单体主线后可按需改回 8003。
 
-## 第五期能力（当前）
+## 第六期能力（当前）
 
-- **VAD**：默认 `StubVAD`（能量门限，CI 友好）；可切 `SileroVAD`（ONNX，需模型文件）
-- **ASR**：默认 `StubASR`（PCM 足够长时返回固定文案）；可切 `OpenAICompatASR`（Whisper 兼容接口）
-- **分句会话**：每 client 独立 `ListenSession`；auto 模式静音结束触发 ASR；manual 模式在 `listen stop` 时 flush
-- **listen / detect 对齐**：access `listen start|stop|detect` → preprocess `ControlListen`；detect 文本仍注入 agent
-- **Abort**：WS abort 扇出到 `Agent` + `Speaker` + `Preprocess`（清空 VAD/ASR 缓冲）
-- **AEC**：speaker 下行 Opus 解码后 `PushAecReference`；hello `features.aec=true` 时 preprocess 谱减；语音打断 barge-in
-- **TTS**（第四期）：EchoTTS / EdgeTTS、分句队列、rate controller、broadcast_speak
+- **韧性**：`xiaozhi_common.resilience` — 超时 / 有限重试 / 熔断；ASR·LLM·关键 gRPC 已接入；失败降级话术
+- **指标**：access `GET /metrics`（`xiaozhi_ws_active_connections` 等）；admin 控制面指标；上游调用 / 熔断状态
+- **连接上限**：`max_connections` / `max_connections_per_device`；`/ready` 打满 503；重连替换旧 socket（不污染索引）
+- **生产门禁**：`XIAOZHI_ENV=production` 时 model-admin 敏感路由需 `Bearer` / `X-Admin-Token`
+- **生产 compose**：`docker-compose.prod.yml` + `deploy/production/config.overlay.yaml`
+- **CI / 文档**：门禁切到本目录；单体见 `xiaozhi-server/RETIRED.md`
+- 继承第五期：VAD / ASR / AEC / listen / Abort；第四期 TTS；第三期 Agent
 
 ```
 Device --OTA--> model-admin
@@ -71,6 +71,15 @@ python scripts/run_tests.py --unit-only
 默认带 `--disable_nacos`，用静态端口互发现。有 Nacos 时去掉该参数，并配置 `--nacos_host` / `--group_name` / `--env_id`。
 
 可用 `--peer name=host:port` 覆盖发现地址。
+
+### 生产 compose
+
+```bash
+cp .env.example .env
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+详见 [docs/Production.md](../../docs/Production.md)。
 
 ### 切换真实 LLM
 
@@ -144,15 +153,15 @@ ASR:
 
 ### 手动探活
 
-- Access health / ready: `http://127.0.0.1:8103/health` 、`/ready`
+- Access health / ready / metrics: `http://127.0.0.1:8103/health` 、`/ready` 、`/metrics`
 - Model-admin: `http://127.0.0.1:8004/health` 、`/ready` 、`/metrics` 、`/config`
 - OTA: `POST http://127.0.0.1:8004/xiaozhi/ota/`（header: `device-id` / `client-id`）
 - Vision: `GET|POST http://127.0.0.1:8004/mcp/vision/explain`
-- Broadcast: `POST http://127.0.0.1:8004/broadcast_speak` body `{"text":"全员播报测试"}`
+- Broadcast: `POST http://127.0.0.1:8004/broadcast_speak` body `{"text":"全员播报测试"}`（生产需 admin token）
 - WS: `ws://127.0.0.1:8103/xiaozhi/v1/?device-id=test-001`  
   发送：`{"type":"listen","state":"detect","text":"现在几点了"}`，应收到 `type=tts`（`state=start` / `sentence_start` / Opus / `stop`）。
 - 音频链路：`listen start` → 二进制 Opus → VAD 分句 → ASR → `type=stt` + agent 对话 → TTS。
-- 热更新：`POST http://127.0.0.1:8004/config/reload`（会广播到 access）
+- 热更新：`POST http://127.0.0.1:8004/config/reload`（会广播到 access；生产需 token）
 
 ## 与单体模块映射
 
@@ -181,7 +190,6 @@ ASR:
 ### 第一期（完成）
 
 骨架、统一 proto、Nacos/静态发现、假 ASR/LLM/TTS 端到端联调。  
-**不删除** `xiaozhi-server`，两边并存。
 
 ### 第二期（完成）
 
@@ -201,25 +209,26 @@ ASR:
 - abort 清空 speaker；broadcast_speak 经 admin→speaker→access
 - 默认 EchoTTS；EdgeTTS 可配置
 
-### 第五期（当前）
+### 第五期（完成）
 
 - preprocess 承接 VAD（Stub / Silero）；receiver 承接 ASR（Stub / OpenAI 兼容）
 - AEC 参考音通道（speaker → preprocess）；hello `features.aec` 对齐
 - listen start/stop/detect 与 access 状态对齐；abort 扇出含 preprocess
 
-### 第六期：收口
+### 第六期（当前 · 收口）
 
-- 韧性、指标、连接上限落地
-- 生产 compose / 门禁切换
-- **删除** `main/xiaozhi-server`，文档与 CI 指向本目录
+- 韧性（超时/重试/熔断）、指标、连接上限落地
+- 生产 compose / 控制面门禁
+- 文档与 CI 指向本目录；单体标记退役（`xiaozhi-server/RETIRED.md`）
+- 物理删除单体树待 provider 对齐后单独执行（避免打断存量 `Dockerfile-server`）
 
-## 关键耦合（后续必须显式设计）
+## 关键耦合（已设计）
 
 1. 原 `ConnectionHandler` 神对象 → access 只留会话壳；agent 用 Session API
-2. Abort/barge-in → `Agent.Abort` + `Speaker.Abort` + `Preprocess.Abort`（第五期已接通）
-3. AEC 耦合 speaker ↔ preprocess（第五期基础通道已接通；MQTT 时间戳头可后续加强）
-4. 设备 MCP/IoT 同 WS → agent 经 access 代理（第三期已接通基础路径）
-5. 插件不再依赖 Python `conn` 对象（第三期 Session 替代）
+2. Abort/barge-in → `Agent.Abort` + `Speaker.Abort` + `Preprocess.Abort`
+3. AEC 耦合 speaker ↔ preprocess（基础通道已接通；MQTT 时间戳头可后续加强）
+4. 设备 MCP/IoT 同 WS → agent 经 access 代理
+5. 插件不再依赖 Python `conn` 对象（Session 替代）
 
 ## 目录结构
 
@@ -229,14 +238,16 @@ xiaozhi-microserver/
   requirements.txt
   start_dev_services.bat|.sh
   docker-compose.yml
+  docker-compose.prod.yml
+  config.production.example.yaml
+  deploy/production/config.overlay.yaml
   common/
     proto/  generate_proto.py  generated/xiaozhi/  xiaozhi_common/
   xiaozhi-access/
-  xiaozhi-agent/          # Session / chat_engine / LLM / plugins
-  xiaozhi-audio-preprocess/  # ListenSession / StubVAD / SileroVAD / AEC
-  xiaozhi-audio-receiver/    # StubASR / OpenAICompatASR
-  xiaozhi-audio-speaker/  # SpeakSession / EchoTTS / EdgeTTS / AEC uplink
+  xiaozhi-agent/
+  xiaozhi-audio-preprocess/
+  xiaozhi-audio-receiver/
+  xiaozhi-audio-speaker/
   xiaozhi-model-admin/
-  scripts/ws_smoke.py  scripts/agent_smoke.py  scripts/ota_smoke.py  scripts/run_tests.py
-  tests/test_agent_phase3.py  tests/test_speaker_phase4.py  tests/test_vad_asr_phase5.py
+  scripts/…  tests/test_*_phase*.py  tests/test_phase6_resilience.py
 ```

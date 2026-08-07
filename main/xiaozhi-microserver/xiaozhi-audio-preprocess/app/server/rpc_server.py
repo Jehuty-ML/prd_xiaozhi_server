@@ -44,7 +44,7 @@ def serve(config: BaseServerConfig) -> None:
     resolver = ServiceResolver(config, nacos)
     for name in (RECEIVER_SERVICE, AGENT_SERVICE, ACCESS_SERVICE, SPEAKER_SERVICE):
         resolver.watch(name)
-    pool = GrpcClientPool(resolver)
+    pool = GrpcClientPool(resolver, config=runtime_config.data)
 
     servicer = AudioPreprocessServicer(pool)
     session_store.configure(
@@ -65,7 +65,7 @@ def serve(config: BaseServerConfig) -> None:
     server = start_grpc_server(
         port=port, max_workers=config.rpc_max_connect, register_fn=register
     )
-    logger.info(f"{config.server_name} ready grpc={port} (phase-5 VAD)")
+    logger.info(f"{config.server_name} ready grpc={port} (phase-6 VAD+resilience)")
     try:
         server.wait_for_termination()
     except KeyboardInterrupt:

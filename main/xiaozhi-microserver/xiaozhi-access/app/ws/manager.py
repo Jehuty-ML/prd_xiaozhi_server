@@ -9,7 +9,11 @@ from loguru import logger
 
 
 class ConnectionManager:
-    """In-memory device WebSocket registry."""
+    """In-memory device WebSocket registry.
+
+    Phase-6: reconnect on the same client_id replaces the previous socket
+    without corrupting reverse indexes (old WS is closed and unbound first).
+    """
 
     def __init__(self) -> None:
         self._by_client: dict[str, WebSocket] = {}
@@ -17,6 +21,7 @@ class ConnectionManager:
         self._states: dict[str, str] = {}
         self._meta: dict[str, dict[str, Any]] = {}
         self._session_by_client: dict[str, str] = {}
+        self._aliases: dict[str, str] = {}  # secondary id → primary bind_id
         self._lock = threading.Lock()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
@@ -30,50 +35,92 @@ class ConnectionManager:
         *,
         session_id: str = "",
         device_id: str = "",
-    ) -> None:
+        alias_id: str = "",
+    ) -> Optional[WebSocket]:
+        """Bind client_id → ws. Returns previous WS if replaced (caller may close it)."""
+        previous: Optional[WebSocket] = None
         with self._lock:
+            previous = self._by_client.get(client_id)
+            if previous is not None and previous is not ws:
+                self._by_ws.pop(previous, None)
             self._by_client[client_id] = ws
             self._by_ws[ws] = client_id
             self._states[client_id] = "connected"
-            self._meta[client_id] = {
-                "device_id": device_id or client_id,
-                "session_id": session_id,
-            }
+            meta = self._meta.get(client_id) or {}
+            meta.update(
+                {
+                    "device_id": device_id or client_id,
+                    "session_id": session_id,
+                }
+            )
+            self._meta[client_id] = meta
             if session_id:
                 self._session_by_client[client_id] = session_id
-        logger.info(f"WS bound client_id={client_id} active={len(self._by_client)}")
+            if alias_id and alias_id != client_id:
+                self._aliases[alias_id] = client_id
+                meta["client_id"] = alias_id
+        logger.info(
+            f"WS bound client_id={client_id} replaced={previous is not None and previous is not ws} "
+            f"active={len(self._by_client)}"
+        )
+        return previous if previous is not None and previous is not ws else None
 
     def unbind(self, ws: WebSocket) -> None:
         with self._lock:
             client_id = self._by_ws.pop(ws, None)
-            if client_id:
-                self._by_client.pop(client_id, None)
-                self._states.pop(client_id, None)
-                self._meta.pop(client_id, None)
-                self._session_by_client.pop(client_id, None)
-                logger.info(f"WS unbound client_id={client_id}")
+            if not client_id:
+                return
+            # Only clear primary maps if this ws is still the active one
+            current = self._by_client.get(client_id)
+            if current is not None and current is not ws:
+                logger.debug(
+                    f"WS unbind ignored stale socket client_id={client_id}"
+                )
+                return
+            self._by_client.pop(client_id, None)
+            self._states.pop(client_id, None)
+            self._meta.pop(client_id, None)
+            self._session_by_client.pop(client_id, None)
+            stale_aliases = [a for a, p in self._aliases.items() if p == client_id]
+            for a in stale_aliases:
+                self._aliases.pop(a, None)
+            logger.info(f"WS unbound client_id={client_id}")
+
+    def resolve_client_id(self, client_or_alias: str) -> Optional[str]:
+        with self._lock:
+            if client_or_alias in self._by_client:
+                return client_or_alias
+            return self._aliases.get(client_or_alias)
 
     def get_client_id(self, ws: WebSocket) -> Optional[str]:
         return self._by_ws.get(ws)
 
     def get_state(self, client_id: str) -> str:
-        return self._states.get(client_id, "unknown")
+        resolved = self.resolve_client_id(client_id) or client_id
+        return self._states.get(resolved, "unknown")
 
     def set_state(self, client_id: str, state: str) -> None:
+        resolved = self.resolve_client_id(client_id) or client_id
         with self._lock:
-            if client_id in self._by_client:
-                self._states[client_id] = state
+            if resolved in self._by_client:
+                self._states[resolved] = state
 
     def set_meta(self, client_id: str, key: str, value: Any) -> None:
+        resolved = self.resolve_client_id(client_id) or client_id
         with self._lock:
-            meta = self._meta.setdefault(client_id, {})
+            meta = self._meta.setdefault(resolved, {})
             meta[key] = value
 
     def get_meta(self, client_id: str) -> dict[str, Any]:
-        return dict(self._meta.get(client_id) or {})
+        resolved = self.resolve_client_id(client_id) or client_id
+        return dict(self._meta.get(resolved) or {})
+
+    def _lookup_ws(self, client_id: str) -> Optional[WebSocket]:
+        resolved = self.resolve_client_id(client_id) or client_id
+        return self._by_client.get(resolved)
 
     async def send_bytes(self, client_id: str, data: bytes) -> bool:
-        ws = self._by_client.get(client_id)
+        ws = self._lookup_ws(client_id)
         if not ws:
             logger.warning(f"No WS for client_id={client_id}")
             return False
@@ -81,7 +128,7 @@ class ConnectionManager:
         return True
 
     async def send_text(self, client_id: str, text: str) -> bool:
-        ws = self._by_client.get(client_id)
+        ws = self._lookup_ws(client_id)
         if not ws:
             logger.warning(f"No WS for client_id={client_id}")
             return False

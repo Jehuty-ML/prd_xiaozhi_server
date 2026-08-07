@@ -1,0 +1,21 @@
+# 生产示例配置片段（合并进 xiaozhi-model-admin/config.yaml 或 overlay）
+# 完整叠加见 deploy/production/config.overlay.yaml
+
+server:
+  environment: production
+  auth_key: "replace-with-long-random-secret"
+  auth:
+    enabled: true
+    allow_insecure_disable: false
+    allow_whitelist_bypass: false
+    allowed_devices: []
+  admin:
+    require_auth: true
+    token: "replace-with-long-random-secret"
+  connection:
+    max_connections: 200
+    max_connections_per_device: 2
+  resilience:
+    enabled: true
+  websocket: "wss://voice.example.com/xiaozhi/v1/"
+  vision_explain: "https://voice.example.com/mcp/vision/explain"

@@ -16,6 +16,7 @@ from xiaozhi_common.runtime_env import resolve_environment
 from app.api.metrics import observe_reload, render_latest, set_access_gauges, CONTENT_TYPE_LATEST
 from app.api.ota import OtaService
 from app.api.vision import VisionService
+from app.api.admin_auth import create_admin_auth_middleware
 from app.core.handler.config_store import ConfigStore
 
 
@@ -27,7 +28,7 @@ class BroadcastSpeakBody(BaseModel):
 def create_http_app(
     store: ConfigStore, pool: Optional[GrpcClientPool] = None
 ) -> FastAPI:
-    app = FastAPI(title="xiaozhi-model-admin", version="0.4.0")
+    app = FastAPI(title="xiaozhi-model-admin", version="0.6.0")
     ota = OtaService(store.get)
     vision = VisionService(store.get)
 
@@ -39,6 +40,8 @@ def create_http_app(
     store.add_listener(_on_config)
     _on_config(store.get(), "startup")
 
+    app.middleware("http")(create_admin_auth_middleware(store.get))
+
     app.include_router(ota.create_router())
     app.include_router(vision.create_router())
 
@@ -47,7 +50,7 @@ def create_http_app(
         return {
             "status": "ok",
             "service": "xiaozhi-model-admin",
-            "phase": 4,
+            "phase": 6,
             "environment": resolve_environment(store.get()),
         }
 

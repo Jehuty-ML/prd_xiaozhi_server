@@ -11,13 +11,14 @@ from xiaozhi_common.constants import (
     SPEAKER_SERVICE,
 )
 from xiaozhi_common.grpc.client import GrpcClientPool
+from xiaozhi_common.resilience import UpstreamError, get_fallback_text
 
 from app.core.audio_codec import OpusDecoderSession
 from app.core.listen_session import session_store
 
 
 class AudioPreprocessServicer(audio_pb2_grpc.AudioPreprocessServiceServicer):
-    """Phase-5: VAD session + ASR flush + AEC reference + listen control."""
+    """Phase-5/6: VAD session + ASR flush + AEC reference + listen control + resilience."""
 
     def __init__(self, pool: GrpcClientPool) -> None:
         self.pool = pool
@@ -29,15 +30,22 @@ class AudioPreprocessServicer(audio_pb2_grpc.AudioPreprocessServiceServicer):
             stub = command_pb2_grpc.AccessCommandServiceStub(
                 self.pool.channel(ACCESS_SERVICE)
             )
-            stub.SendCommand(
-                command_pb2.CommandRequest(
-                    message_id=message_id,
-                    client_id=client_id,
-                    command=command,
-                    payload="",
+            timeout = self.pool.default_timeout("grpc")
+            self.pool.call(
+                "access",
+                lambda: stub.SendCommand(
+                    command_pb2.CommandRequest(
+                        message_id=message_id,
+                        client_id=client_id,
+                        command=command,
+                        payload="",
+                    ),
+                    metadata=self.pool.metadata(client_id, message_id),
+                    timeout=min(5.0, timeout),
                 ),
-                metadata=self.pool.metadata(client_id, message_id),
-                timeout=5,
+                provider="SendCommand",
+                use_circuit=False,
+                max_retries=0,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"notify access command={command} failed: {exc}")
@@ -47,44 +55,69 @@ class AudioPreprocessServicer(audio_pb2_grpc.AudioPreprocessServiceServicer):
             stub = command_pb2_grpc.AccessDeviceProxyServiceStub(
                 self.pool.channel(ACCESS_SERVICE)
             )
-            stub.SendToDevice(
-                command_pb2.DeviceMessageRequest(
-                    message_id=message_id,
-                    client_id=client_id,
-                    json_text=json_text,
+            timeout = self.pool.default_timeout("grpc")
+            self.pool.call(
+                "access",
+                lambda: stub.SendToDevice(
+                    command_pb2.DeviceMessageRequest(
+                        message_id=message_id,
+                        client_id=client_id,
+                        json_text=json_text,
+                    ),
+                    metadata=self.pool.metadata(client_id, message_id),
+                    timeout=min(5.0, timeout),
                 ),
-                metadata=self.pool.metadata(client_id, message_id),
-                timeout=5,
+                provider="SendToDevice",
+                use_circuit=False,
+                max_retries=0,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"SendToDevice failed: {exc}")
 
     def _forward_text(self, client_id: str, message_id: str, text: str) -> str:
         stub = audio_pb2_grpc.AgentServiceStub(self.pool.channel(AGENT_SERVICE))
-        resp = stub.SendText(
-            audio_pb2.TextRequest(
-                message_id=message_id, client_id=client_id, text=text
-            ),
-            metadata=self.pool.metadata(client_id, message_id),
-            timeout=30,
-        )
-        return resp.result or ""
+        timeout = self.pool.default_timeout("llm")
+        try:
+            resp = self.pool.call(
+                "llm",
+                lambda: stub.SendText(
+                    audio_pb2.TextRequest(
+                        message_id=message_id, client_id=client_id, text=text
+                    ),
+                    metadata=self.pool.metadata(client_id, message_id),
+                    timeout=timeout,
+                ),
+                provider="AgentSendText",
+            )
+            return resp.result or ""
+        except UpstreamError as exc:
+            logger.warning(f"agent SendText upstream failed: {exc}")
+            return get_fallback_text(self.pool.config, "llm", exc.kind)
 
     def _asr_recognize(self, client_id: str, message_id: str, pcm: bytes) -> str:
         stub = audio_pb2_grpc.AudioReceiverServiceStub(
             self.pool.channel(RECEIVER_SERVICE)
         )
-        resp = stub.AsrRecognize(
-            audio_pb2.AsrRecognizeRequest(
-                message_id=message_id,
-                client_id=client_id,
-                pcm=pcm,
-                sample_rate=16000,
-            ),
-            metadata=self.pool.metadata(client_id, message_id),
-            timeout=30,
-        )
-        return resp.text or ""
+        timeout = self.pool.default_timeout("asr")
+        try:
+            resp = self.pool.call(
+                "asr",
+                lambda: stub.AsrRecognize(
+                    audio_pb2.AsrRecognizeRequest(
+                        message_id=message_id,
+                        client_id=client_id,
+                        pcm=pcm,
+                        sample_rate=16000,
+                    ),
+                    metadata=self.pool.metadata(client_id, message_id),
+                    timeout=timeout,
+                ),
+                provider="AsrRecognize",
+            )
+            return resp.text or ""
+        except UpstreamError as exc:
+            logger.warning(f"ASR upstream failed: {exc}")
+            return ""
 
     def _abort_peers(self, client_id: str, message_id: str, reason: str) -> None:
         try:

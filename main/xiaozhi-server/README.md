@@ -1,8 +1,11 @@
 # xiaozhi-server 生产级改造说明
 
+> ⚠️ **第六期已收口**：本目录已退役为主运行时。请改用
+> [`../xiaozhi-microserver`](../xiaozhi-microserver)。详见 [RETIRED.md](./RETIRED.md)。
+
 本文档记录将 `xiaozhi-server`（实时语音 WebSocket 服务）提升为企业生产级时的**问题诊断、改造优先级，以及已落地的改动**。
 
-> 范围：`main/xiaozhi-server`  
+> 范围：`main/xiaozhi-server`（历史单体，仅供对照）  
 > 性质：有状态长连接网关（每设备一条 WebSocket，挂载 VAD / ASR / LLM / TTS、音频缓冲、线程池、上报队列）
 
 ---

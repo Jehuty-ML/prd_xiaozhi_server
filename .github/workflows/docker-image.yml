@@ -13,7 +13,7 @@ on:
 jobs:
   gate:
     name: Release gate (unit tests)
-    uses: ./.github/workflows/xiaozhi-server-tests.yml
+    uses: ./.github/workflows/xiaozhi-microserver-tests.yml
 
   release:
     name: Release Docker images

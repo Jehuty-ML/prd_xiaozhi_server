@@ -1,21 +1,14 @@
-name: xiaozhi-server tests
+name: xiaozhi-server tests (retired)
+
+# 第六期起门禁已迁至 xiaozhi-microserver-tests.yml。
+# 本 workflow 仅保留手工触发，便于对照历史单体测试。
 
 on:
-  push:
-    paths:
-      - "main/xiaozhi-server/**"
-      - ".github/workflows/xiaozhi-server-tests.yml"
-      - ".github/workflows/docker-image.yml"
-  pull_request:
-    paths:
-      - "main/xiaozhi-server/**"
-      - ".github/workflows/xiaozhi-server-tests.yml"
-  workflow_call:
   workflow_dispatch:
 
 jobs:
   unit-tests:
-    name: Gateway unit tests
+    name: Gateway unit tests (legacy monolith)
     runs-on: ubuntu-latest
     defaults:
       run:
