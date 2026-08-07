@@ -672,8 +672,29 @@ async def async_main(args) -> int:
         results.append(await bench_active(args, server_pid, "asr"))
 
     print("\n======== SUMMARY ========")
+    report = {
+        "url": args.url,
+        "mode": args.mode,
+        "pin_cores": args.pin_cores or 0,
+        "server_pid": server_pid,
+        "results": [],
+    }
     for r in results:
         print(f"[{'PASS' if r.ok else 'FAIL'}] {r.mode}: {r.detail}")
+        report["results"].append(
+            {
+                "mode": r.mode,
+                "ok": r.ok,
+                "detail": r.detail,
+                "extra": r.extra,
+            }
+        )
+    if getattr(args, "report_json", None):
+        out = args.report_json
+        os.makedirs(os.path.dirname(os.path.abspath(out)) or ".", exist_ok=True)
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+        print(f"Wrote report: {out}")
     return 0 if all(r.ok for r in results) else 1
 
 
@@ -708,6 +729,11 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--auth-key", default=None)
     p.add_argument("--token", default=None)
     p.add_argument("--no-auth", action="store_true")
+    p.add_argument(
+        "--report-json",
+        default=None,
+        help="将 SUMMARY 写入 JSON（便于归档/对比）",
+    )
     return p
 
 

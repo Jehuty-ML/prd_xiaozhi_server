@@ -11,6 +11,7 @@ from core.websocket_server import WebSocketServer
 from core.utils.util import check_ffmpeg_installed
 from core.utils.gc_manager import get_gc_manager
 from core.utils.dialogue_registry import DialogueServerRegistrar
+from core.utils.health import get_health_paths, health_state
 
 TAG = __name__
 logger = setup_logging()
@@ -75,9 +76,16 @@ async def main():
 
     # 启动 WebSocket 服务器
     ws_server = WebSocketServer(config)
+    health_state.bind(
+        config=config,
+        ws_server=ws_server,
+        dialogue_registrar=dialogue_registrar,
+    )
     ws_task = asyncio.create_task(ws_server.start())
     # 启动 Simple http 服务器
     ota_server = SimpleHttpServer(config)
+    # 热更新时 WS → HTTP/OTA 同步认证与 health 配置
+    ws_server.http_server = ota_server
     ota_task = asyncio.create_task(ota_server.start())
 
     read_config_from_api = config.get("read_config_from_api", False)
@@ -93,6 +101,21 @@ async def main():
         get_local_ip(),
         port,
     )
+    health_cfg = config.get("server", {}).get("health") or {}
+    if health_cfg.get("enabled", True):
+        live_path, ready_path = get_health_paths(config)
+        logger.bind(tag=TAG).info(
+            "存活检查是\t\thttp://{}:{}{}",
+            get_local_ip(),
+            port,
+            live_path,
+        )
+        logger.bind(tag=TAG).info(
+            "就绪检查是\t\thttp://{}:{}{}",
+            get_local_ip(),
+            port,
+            ready_path,
+        )
     metrics_cfg = config.get("server", {}).get("metrics") or {}
     if metrics_cfg.get("enabled", True):
         metrics_path = metrics_cfg.get("path", "/metrics")

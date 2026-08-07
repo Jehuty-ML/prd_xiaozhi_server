@@ -10,7 +10,15 @@ from typing import Dict, List, Tuple
 from aiohttp import web
 
 from core.auth import AuthManager
-from core.utils.runtime_env import resolve_auth_enabled, resolve_environment
+from core.utils.runtime_env import (
+    is_device_permitted,
+    normalize_allowed_devices,
+    resolve_auth_enabled,
+    resolve_devices_allowlist_only,
+    resolve_environment,
+    resolve_whitelist_bypass_allowed,
+    should_bypass_token_for_device,
+)
 from core.utils.util import get_local_ip, get_vision_url
 from core.api.base_handler import BaseHandler
 
@@ -47,17 +55,7 @@ def _is_higher_version(a: str, b: str) -> bool:
 class OTAHandler(BaseHandler):
     def __init__(self, config: dict):
         super().__init__(config)
-        auth_config = config["server"].get("auth", {}) or {}
-        self.auth_enable = resolve_auth_enabled(config)
-        # 设备白名单
-        self.allowed_devices = set(auth_config.get("allowed_devices", []))
-        secret_key = config["server"]["auth_key"]
-        expire_seconds = auth_config.get("expire_seconds")
-        self.auth = AuthManager(secret_key=secret_key, expire_seconds=expire_seconds)
-        self.logger.bind(tag=TAG).info(
-            f"OTA认证: {'enabled' if self.auth_enable else 'disabled'} "
-            f"(env={resolve_environment(config)})"
-        )
+        self._apply_auth_config(config, log=True)
 
         # firmware storage
         self.bin_dir = os.path.join(os.getcwd(), "data", "bin")
@@ -67,6 +65,33 @@ class OTAHandler(BaseHandler):
             "ttl": config.get("firmware_cache_ttl", 30),
             "files_by_model": {},
         }
+
+    def _apply_auth_config(self, config: dict, *, log: bool = False) -> None:
+        """同步认证策略（含智控台「通知更新配置」热更新）。"""
+        self.config = config
+        auth_config = (config.get("server") or {}).get("auth", {}) or {}
+        self.auth_enable = resolve_auth_enabled(config)
+        self.allowed_devices = normalize_allowed_devices(
+            auth_config.get("allowed_devices")
+        )
+        self.whitelist_bypass = resolve_whitelist_bypass_allowed(config)
+        self.devices_allowlist_only = resolve_devices_allowlist_only(config)
+        secret_key = (config.get("server") or {}).get("auth_key", "")
+        expire_seconds = auth_config.get("expire_seconds")
+        self.auth = AuthManager(secret_key=secret_key, expire_seconds=expire_seconds)
+        if log:
+            self.logger.bind(tag=TAG).info(
+                f"OTA认证: {'enabled' if self.auth_enable else 'disabled'} "
+                f"(env={resolve_environment(config)}, "
+                f"whitelist_bypass={self.whitelist_bypass}, "
+                f"allowlist_only={self.devices_allowlist_only})"
+            )
+
+    def apply_config(self, config: dict) -> None:
+        """热更新配置与认证缓存。"""
+        self._apply_auth_config(config, log=True)
+        if "firmware_cache_ttl" in config:
+            self._bin_cache["ttl"] = config.get("firmware_cache_ttl", 30)
 
     def _refresh_bin_cache_if_needed(self):
         now = int(time.time())
@@ -305,9 +330,22 @@ class OTAHandler(BaseHandler):
                 # 如果开启了认证，则进行认证校验
                 token = ""
                 if self.auth_enable:
-                    if self.allowed_devices:
-                        if device_id not in self.allowed_devices:
-                            token = self.auth.generate_token(client_id, device_id)
+                    if not is_device_permitted(
+                        self.config, device_id, self.allowed_devices
+                    ):
+                        return_json = {
+                            "success": False,
+                            "message": "device not in allowlist",
+                        }
+                        return web.Response(
+                            text=json.dumps(return_json, separators=(",", ":")),
+                            content_type="application/json",
+                            status=403,
+                        )
+                    if should_bypass_token_for_device(
+                        self.config, device_id, self.allowed_devices
+                    ):
+                        token = ""
                     else:
                         token = self.auth.generate_token(client_id, device_id)
                 # NOTE: use websocket_port here

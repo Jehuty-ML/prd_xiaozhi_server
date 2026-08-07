@@ -4,6 +4,12 @@ from config.logger import setup_logging
 from core.api.ota_handler import OTAHandler
 from core.api.vision_handler import VisionHandler
 from core.utils import metrics as metrics_mod
+from core.utils.health import (
+    build_liveness_payload,
+    build_readiness_payload,
+    get_health_paths,
+    health_state,
+)
 
 TAG = __name__
 
@@ -15,6 +21,22 @@ class SimpleHttpServer:
         self.ota_handler = OTAHandler(config)
         self.vision_handler = VisionHandler(config)
         metrics_mod.init_metrics(config)
+        health_state.bind(config=config)
+
+    def apply_config(self, config: dict) -> None:
+        """与 WebSocketServer.update_config 对齐：同步 HTTP/OTA/health 侧配置。"""
+        self.config = config or {}
+        self.ota_handler.apply_config(self.config)
+        # VisionHandler 持有 config 引用，需一并替换
+        self.vision_handler.config = self.config
+        metrics_mod.init_metrics(self.config)
+        health_state.bind(config=self.config)
+        self.logger.bind(tag=TAG).info(
+            "HTTP/OTA/health 配置已与热更新同步 "
+            f"(auth={self.ota_handler.auth_enable}, "
+            f"whitelist_bypass={self.ota_handler.whitelist_bypass}, "
+            f"allowlist_only={self.ota_handler.devices_allowlist_only})"
+        )
 
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
         """获取websocket地址
@@ -41,6 +63,15 @@ class SimpleHttpServer:
             body=body, headers={"Content-Type": metrics_mod.content_type()}
         )
 
+    async def handle_liveness(self, request):
+        """进程存活（liveness）。"""
+        return web.json_response(build_liveness_payload(self.config), status=200)
+
+    async def handle_readiness(self, request):
+        """能否接新流量（readiness）。"""
+        ready, payload = await build_readiness_payload(self.config)
+        return web.json_response(payload, status=200 if ready else 503)
+
     async def start(self):
         try:
             server_config = self.config["server"]
@@ -51,6 +82,9 @@ class SimpleHttpServer:
             metrics_path = metrics_cfg.get("path", "/metrics")
             if not str(metrics_path).startswith("/"):
                 metrics_path = "/" + str(metrics_path)
+            health_cfg = server_config.get("health") or {}
+            health_enabled = bool(health_cfg.get("enabled", True))
+            live_path, ready_path = get_health_paths(self.config)
 
             if port:
                 app = web.Application()
@@ -83,6 +117,9 @@ class SimpleHttpServer:
                         "/mcp/vision/explain", self.vision_handler.handle_options
                     ),
                 ]
+                if health_enabled:
+                    routes.append(web.get(live_path, self.handle_liveness))
+                    routes.append(web.get(ready_path, self.handle_readiness))
                 if metrics_cfg.get("enabled", True):
                     routes.append(web.get(metrics_path, self.handle_metrics))
                 app.add_routes(routes)
@@ -92,6 +129,12 @@ class SimpleHttpServer:
                 await runner.setup()
                 site = web.TCPSite(runner, host, port)
                 await site.start()
+                health_state.mark_http_started()
+                if health_enabled:
+                    self.logger.bind(tag=TAG).info(
+                        f"Health checks: http://{host}:{port}{live_path} "
+                        f"(liveness), http://{host}:{port}{ready_path} (readiness)"
+                    )
                 if metrics_cfg.get("enabled", True):
                     self.logger.bind(tag=TAG).info(
                         f"Prometheus metrics: http://{host}:{port}{metrics_path}"

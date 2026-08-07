@@ -38,13 +38,26 @@ server:
     # 生产若必须临时关闭：设 allow_insecure_disable: true 且 enabled: false
     enabled: false
     allow_insecure_disable: false
+    # 白名单免检（跳过 token）：
+    #   auto=未配置时 development 允许、production 禁止
+    #   true/false=强制开关（生产慎开 true）
+    allow_whitelist_bypass: auto
+    # 仅白名单可接入：true 且 allowed_devices 非空时，未列入的设备即使有 token 也拒绝
+    devices_allowlist_only: false
     # 可选：自定义 PBKDF2 盐（字符串会做 SHA256 规范化）。不配则：
     # development 用历史固定盐；production 由 auth_key 派生
     # pbkdf2_salt: your-deploy-salt
-    # 白名单设备ID列表
-    # 如果属于白名单内的设备，不校验token，直接放行
-    allowed_devices:
-      - "11:22:33:44:55:66"
+    # 白名单设备：免检仅在 allow_whitelist_bypass 生效时跳过 token
+    # 生产建议保持 []；若填写请同时确认 allow_whitelist_bypass / devices_allowlist_only
+    allowed_devices: []
+  # 健康检查（挂在 http_port）
+  # liveness=/health 进程存活；readiness=/ready 能否接新流量
+  health:
+    enabled: true
+    liveness_path: /health
+    readiness_path: /ready
+    # 连接打满时 /ready 返回 503，便于负载均衡摘流
+    reject_when_at_capacity: true
  # MQTT网关配置，用于通过OTA下发到设备，根据mqtt_gateway的.env文件配置，格式为host:port
   mqtt_gateway: null
   # MQTT签名密钥，用于生成MQTT连接密码，根据mqtt_gateway的.env文件配置
@@ -515,7 +528,7 @@ ASR:
     model_type: sense_voice
   SherpaParaformerASR:
     # 中文语音识别模型，可以运行在低性能设备（需手动下载模型，例如RK3566-2g）
-    # 详细配置说明请参考：docs/sherpa-paraformer-guide.md
+    # 本地 Paraformer 配置见本段 provider 字段；文档若缺失可参考 FunASR / sherpa 官方说明
     type: sherpa_onnx_local
     model_dir: models/sherpa-onnx-paraformer-zh-small-2024-03-09
     output_dir: tmp/

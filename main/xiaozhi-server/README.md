@@ -38,9 +38,9 @@
 1. [x] **硬上限**：全局并发、同设备并发、上报队列有界
 2. [x] **确定性清理**：幂等 `close()`、任务登记与统一取消、固定清理顺序、清理超时
 3. [x] **可观测性**：连接数 / 拒绝数、会话生命周期、ASR/TTS/LLM 延迟与错误率、队列深度（Prometheus）
-4. [x] **安全基线（按环境）**：`development` 保留联调兼容；`production` 禁止 query token、禁止硬编码 key 兜底、默认强制 auth、AuthToken 盐值规范化。可选收紧：白名单策略
+4. [x] **安全基线（按环境）**：`development` 保留联调兼容；`production` 禁止 query token、禁止硬编码 key 兜底、默认强制 auth、AuthToken 盐值规范化、**默认禁止白名单免检**
 5. [x] **依赖韧性**：统一失败语义、有限重试、熔断、对设备侧友好降级话术
-6. [ ] **（可选）网关单测**：连接准入/回收与限流行为单测；大拆 `ConnectionHandler` 让位于微服务边界切割，不必先做
+6. [x] **发布门禁单测**：session / resilience / registry / health / runtime_env；CI 见 `.github/workflows/xiaozhi-server-tests.yml`（连接准入全路径单测仍可选）
 
 ---
 
@@ -259,6 +259,8 @@ server:
 | URL query 传 `authorization` | 允许（打 warning） | 拒绝，仅 Header |
 | 天气等硬编码 api_key 兜底 | 允许 | 禁止，未配置则失败 |
 | 连接/OTA 认证 `auth.enabled` | 尊重配置（默认 false） | **强制开启**（除非 `auth.allow_insecure_disable=true`） |
+| 白名单免检（跳过 token） | 默认允许（`allow_whitelist_bypass: auto`） | **默认禁止**；确需才显式 `true` |
+| 仅白名单可接入 | 默认关 | 可选 `devices_allowlist_only: true` |
 | AuthToken PBKDF2 盐 | 历史固定盐（兼容旧 token） | 由 `auth_key` 派生或 `auth.pbkdf2_salt` |
 | query 传 `device-id` / `client-id` | 允许 | 允许（非密钥） |
 
@@ -408,11 +410,14 @@ server:
 
 仍可按需补齐（与拆分并行即可）：
 
-1. **真 readiness**：区分 liveness / readiness（依赖、队列、连接水位）——拆成多服务后更有价值
-2. **网关单测（可选）**：连接准入/回收与限流；韧性已有 `tests/test_resilience.py`；注册已有 `tests/test_dialogue_registry.py`
-3. **安全收尾（可选）**：生产环境收紧设备白名单免检策略
+1. [x] **真 readiness**：`/health`（liveness）+ `/ready`（readiness，连接打满 / registry Redis 失败返回 503）——见 `core/utils/health.py`、[Production.md](../../docs/Production.md)
+2. **网关单测（可选）**：连接准入/回收与限流全路径；核心策略单测与 CI 门禁已有
+3. [x] **安全收尾**：production 默认禁止白名单免检；可选 `devices_allowlist_only`
 4. **adapter 失败语义（渐进）**：各家 ASR/TTS/LLM 内源统一抛 `UpstreamError`（关键路径已接好）
 5. **注册增强（可选）**：按连接水位加权选路、跨实例踢线（Java 侧有 device→instance 亲和可参考）
+
+发布门禁：`.github/workflows/xiaozhi-server-tests.yml`；本地验证：`python scripts/production_verify.py`。  
+运维入口：[docs/Production.md](../../docs/Production.md)（声明 / 探活 / 容量）。
 
 不做：OTel / SkyWalking（已有 Prometheus；跨服务排障痛点再加）
 
