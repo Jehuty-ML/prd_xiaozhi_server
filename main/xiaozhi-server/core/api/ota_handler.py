@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import os
+import random
 import re
 import glob
 from typing import Dict, List, Tuple
@@ -172,6 +173,10 @@ class OTAHandler(BaseHandler):
     def _get_static_websocket_url(self, local_ip: str, port: int) -> str:
         """获取静态 websocket 地址（配置或本机推导）
 
+        server.websocket 可为分号分隔的多地址列表（与 manager-api 一致）。
+        设备协议只接受单个 URL；注册中心不可用时必须随机选一项下发，
+        禁止把整串「a;b」原样返回，否则设备无法建连。
+
         Args:
             local_ip: 本地IP地址
             port: 端口号
@@ -180,12 +185,23 @@ class OTAHandler(BaseHandler):
             str: websocket地址
         """
         server_config = self.config["server"]
-        websocket_config = server_config.get("websocket", "")
+        websocket_config = str(server_config.get("websocket", "") or "").strip()
+        derived = f"ws://{local_ip}:{port}/xiaozhi/v1/"
 
-        if "你的" not in websocket_config:
-            return websocket_config
-        else:
-            return f"ws://{local_ip}:{port}/xiaozhi/v1/"
+        if not websocket_config or "你" in websocket_config:
+            return derived
+
+        if ";" in websocket_config:
+            candidates = [
+                part.strip()
+                for part in websocket_config.split(";")
+                if part.strip() and "你" not in part
+            ]
+            if not candidates:
+                return derived
+            return random.choice(candidates)
+
+        return websocket_config
 
     async def handle_post(self, request):
         """处理 OTA POST 请求
