@@ -72,6 +72,9 @@ server:
     enabled: false
     # 可选固定实例 ID；不配则用主机名+短 UUID，也可用环境变量 XIAOZHI_INSTANCE_ID
     # instance_id: "dialogue-1"
+    # 多实例务必配置本实例对外 WS（也可用环境变量 XIAOZHI_WEBSOCKET_URL）
+    # 勿依赖 server.websocket 的分号列表首项——那会让所有节点广告同一地址
+    # advertise_websocket: ws://本实例ip或域名:端口号/xiaozhi/v1/
     # 心跳间隔（秒）；TTL 建议 ≥ 2×interval
     heartbeat_interval_seconds: 30
     heartbeat_ttl_seconds: 60

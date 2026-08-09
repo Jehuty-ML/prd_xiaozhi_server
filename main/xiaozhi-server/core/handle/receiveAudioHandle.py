@@ -146,7 +146,13 @@ async def startToChat(conn: "ConnectionHandler", text):
             "CHAT_START 被拒绝，跳过本轮 chat"
         )
         return False
-    await send_stt_message(conn, actual_text)
+    try:
+        await send_stt_message(conn, actual_text)
+    except Exception:
+        # STT/TTS start 发送失败时回滚，避免永久卡在 THINKING（无法 DETECT/LISTEN）
+        if conn.session_sm.is_in(SessionState.THINKING):
+            conn.transition_session(SessionEvent.RESET, detail="stt_send_failed")
+        raise
 
     # 准备开始新会话
     conn.client_abort = False
