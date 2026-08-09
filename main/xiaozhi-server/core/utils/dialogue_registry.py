@@ -191,13 +191,38 @@ def resolve_instance_id(config: Optional[Dict[str, Any]] = None) -> str:
 
 
 def resolve_websocket_address(config: Optional[Dict[str, Any]] = None) -> str:
-    """本实例对外 WebSocket 地址（供 OTA 下发）。"""
+    """本实例对外 WebSocket 地址（供 OTA / Redis 注册心跳）。
+
+    优先级：
+    1. server.registry.advertise_websocket（或 websocket_address / websocket）
+    2. 环境变量 XIAOZHI_WEBSOCKET_URL
+    3. 单值 server.websocket
+    4. 本机 IP + port 推导
+
+    注意：server.websocket 含分号时是静态集群选路列表，不能把首项挂到
+    每个存活实例上——否则实例 B 心跳仍广告 A，A 宕机后 OTA 仍下发死地址。
+    """
     config = config or {}
     server = config.get("server") if isinstance(config.get("server"), dict) else {}
+    registry = (
+        server.get("registry") if isinstance(server.get("registry"), dict) else {}
+    )
+
+    for key in ("advertise_websocket", "websocket_address", "websocket"):
+        adv = str(registry.get(key) or "").strip()
+        if adv and "你" not in adv and ";" not in adv:
+            return adv
+
+    env_ws = (os.environ.get("XIAOZHI_WEBSOCKET_URL") or "").strip()
+    if env_ws and "你" not in env_ws and ";" not in env_ws:
+        return env_ws
+
     ws = str(server.get("websocket") or "").strip()
     if ws and "你" not in ws:
-        # 多地址配置时取第一个；多实例应各自配自己的公网/局域网地址
-        return ws.split(";")[0].strip()
+        if ";" in ws:
+            port = int(server.get("port", 8000) or 8000)
+            return f"ws://{_get_local_ip()}:{port}/xiaozhi/v1/"
+        return ws
     port = int(server.get("port", 8000) or 8000)
     return f"ws://{_get_local_ip()}:{port}/xiaozhi/v1/"
 
