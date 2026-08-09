@@ -292,25 +292,32 @@ async def send_tts_message(conn: "ConnectionHandler", state, text=None):
     if state == "stop":
         # 保存当前的 sentence_id，用于后续判断是否是当前轮次
         current_sentence_id = conn.sentence_id
-        # 播放提示音
-        tts_notify = conn.config.get("enable_stop_tts_notify", False)
-        if tts_notify:
-            stop_tts_notify_voice = conn.config.get(
-                "stop_tts_notify_voice", "config/assets/tts_notify.mp3"
-            )
-            audios = await audio_to_data(stop_tts_notify_voice, is_opus=True)
-            await sendAudio(conn, audios)
-        # 等待所有音频包发送完成
-        await _wait_for_audio_completion(conn)
-
-        # 检查是否是当前轮次
-        if current_sentence_id != conn.sentence_id:
-            return
-
-        # 停止音频发送循环（仅在流控器已初始化时调用）
-        if hasattr(conn, "audio_rate_controller") and conn.audio_rate_controller:
-            conn.audio_rate_controller.stop_sending()
-        conn.clearSpeakStatus()
+        try:
+            # 播放提示音
+            tts_notify = conn.config.get("enable_stop_tts_notify", False)
+            if tts_notify:
+                stop_tts_notify_voice = conn.config.get(
+                    "stop_tts_notify_voice", "config/assets/tts_notify.mp3"
+                )
+                audios = await audio_to_data(stop_tts_notify_voice, is_opus=True)
+                await sendAudio(conn, audios)
+            # 等待所有音频包发送完成
+            await _wait_for_audio_completion(conn)
+            # 检查是否是当前轮次
+            if current_sentence_id != conn.sentence_id:
+                return
+        finally:
+            # 超时 cancel / 发送循环崩溃唤醒后，仍须清讲话态与广播 play_only
+            if current_sentence_id == conn.sentence_id:
+                if hasattr(conn, "audio_rate_controller") and conn.audio_rate_controller:
+                    try:
+                        conn.audio_rate_controller.stop_sending()
+                    except Exception:
+                        pass
+                try:
+                    conn.clearSpeakStatus()
+                except Exception:
+                    pass
 
     # 发送消息到客户端
     await conn.websocket.send(json.dumps(message))
