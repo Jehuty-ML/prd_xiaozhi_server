@@ -21,6 +21,7 @@ from core.utils.session_state import (
     is_play_only_mode,
     resolve_session_mode,
     speak_broadcast_text,
+    speak_play_only_denied,
     sync_legacy_flags,
     transition_session,
 )
@@ -620,6 +621,93 @@ class SessionConnectionWiringTests(unittest.IsolatedAsyncioTestCase):
             self.conn.config.get("session_state", {}).get("mode"),
             PLAY_ONLY_SESSION_MODE,
         )
+
+    async def test_deny_during_broadcast_does_not_finish_play_only(self):
+        """广播中唤醒降级不得结束临时 play_only（否则 mute 被一句唤醒拆掉）。"""
+        self.conn.websocket = object()
+        self.conn._closed = False
+        self.conn.clear_queues = lambda: None
+        self.conn.config = {"session_state": {"mode": "common"}}
+        self.conn.tts = object()
+        self.conn.stop_event = None
+        self.conn.client_abort = False
+        self.conn.sentence_id = None
+
+        spoken = []
+
+        def _fake_speak(conn, text):
+            spoken.append(text)
+
+        import sys
+        import types
+
+        fake_intent = types.ModuleType("core.handle.intentHandler")
+        fake_intent.speak_txt = _fake_speak
+        prev = sys.modules.get("core.handle.intentHandler")
+        sys.modules["core.handle.intentHandler"] = fake_intent
+        try:
+            ok = await speak_broadcast_text(self.conn, "紧急通知")
+            self.assertTrue(ok)
+            broadcast_sid = self.conn._broadcast_sentence_id
+            self.assertTrue(self.conn._broadcast_speak_active)
+            self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
+
+            # 广播中尝试对话：应忽略降级 TTS，保持广播会话
+            speak_play_only_denied(self.conn)
+            self.assertEqual(spoken, ["紧急通知"])
+            self.assertEqual(self.conn.sentence_id, broadcast_sid)
+            self.assertTrue(self.conn._broadcast_speak_active)
+            self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
+
+            # 即便误触发嵌套 clear（sentence_id 被改掉），也不得还原 common
+            self.conn.sentence_id = "deny-sid"
+            clear_speak_status(self.conn)
+            self.assertTrue(self.conn._broadcast_speak_active)
+            self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
+
+            # 广播句本身结束：才恢复 common
+            self.conn.sentence_id = broadcast_sid
+            clear_speak_status(self.conn)
+            self.assertFalse(self.conn._broadcast_speak_active)
+            self.assertEqual(self.conn.session_sm.mode, DEFAULT_SESSION_MODE)
+        finally:
+            if prev is None:
+                sys.modules.pop("core.handle.intentHandler", None)
+            else:
+                sys.modules["core.handle.intentHandler"] = prev
+
+    async def test_soft_barge_in_window_hot_reload_updates_restore(self):
+        """重叠广播软打断窗口内热更新 play_only，结束后不得还原 common。"""
+        self.conn.websocket = object()
+        self.conn._closed = False
+        self.conn.clear_queues = lambda: None
+        self.conn.config = {"session_state": {"mode": "common"}}
+        self.conn.tts = object()
+        self.conn.client_abort = False
+
+        # 模拟广播进行中 + 软打断窗口（active 已摘掉）
+        self.conn.session_sm.switch_mode(PLAY_ONLY_SESSION_MODE, reset_to_idle=True)
+        self.conn._broadcast_restore_mode = DEFAULT_SESSION_MODE
+        self.conn._broadcast_speak_active = False
+        self.conn._broadcast_soft_barge_in = True
+
+        ok = await apply_session_mode(
+            self.conn, PLAY_ONLY_SESSION_MODE, force_interrupt=True
+        )
+        self.assertTrue(ok)
+        self.assertEqual(self.conn._broadcast_restore_mode, PLAY_ONLY_SESSION_MODE)
+
+        self.conn._broadcast_soft_barge_in = False
+        self.conn._broadcast_speak_active = True
+        self.conn._broadcast_sentence_id = "bcast"
+        self.conn.sentence_id = "bcast"
+        self.assertTrue(
+            transition_session(
+                self.conn, SessionEvent.TTS_START, detail="broadcast_speak"
+            )
+        )
+        clear_speak_status(self.conn)
+        self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
 
 
 if __name__ == "__main__":
