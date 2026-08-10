@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import os
+import random
 import re
 import socket
 import time
@@ -101,12 +102,31 @@ class OtaService:
         return response
 
     def _websocket_url(self) -> str:
+        """Return a single websocket URL for the device.
+
+        ``server.websocket`` may be a semicolon-separated list (same as
+        manager-api). Devices accept only one URL; never return the joined
+        string ``a;b`` or the firmware cannot connect.
+        """
         server = self.config.get("server") or {}
-        configured = str(server.get("websocket") or "")
-        if configured and "你的" not in configured:
-            return configured
+        configured = str(server.get("websocket") or "").strip()
         port = int(server.get("port", 8000))
-        return f"ws://{_local_ip()}:{port}/xiaozhi/v1/"
+        derived = f"ws://{_local_ip()}:{port}/xiaozhi/v1/"
+
+        if not configured or "你" in configured:
+            return derived
+
+        if ";" in configured:
+            candidates = [
+                part.strip()
+                for part in configured.split(";")
+                if part.strip() and "你" not in part
+            ]
+            if not candidates:
+                return derived
+            return random.choice(candidates)
+
+        return configured
 
     def _download_base(self) -> str:
         server = self.config.get("server") or {}

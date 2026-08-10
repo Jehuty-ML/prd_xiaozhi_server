@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from loguru import logger
 
 from xiaozhi_common.auth import VisionAuthToken
+from xiaozhi_common.runtime_env import is_development
 
 MAX_FILE_SIZE = 5 * 1024 * 1024
 
@@ -46,13 +47,16 @@ class VisionService:
 
     def _verify(self, request: Request) -> Tuple[bool, Optional[str]]:
         client_id = request.headers.get("Client-Id") or request.headers.get("client-id")
+        # Only development may skip Vision JWT for the web test client.
         if client_id == "web_test_client":
-            device_id = (
-                request.headers.get("Device-Id")
-                or request.headers.get("device-id")
-                or "test_device"
-            )
-            return True, device_id
+            if is_development(self.config):
+                device_id = (
+                    request.headers.get("Device-Id")
+                    or request.headers.get("device-id")
+                    or "test_device"
+                )
+                return True, device_id
+            logger.warning("production rejected web_test_client Vision auth bypass")
         auth_header = request.headers.get("Authorization") or ""
         if not auth_header.startswith("Bearer "):
             return False, None
