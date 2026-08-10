@@ -39,9 +39,16 @@ def test_happy_path_and_illegal():
     assert sm.state == SessionState.SPEAKING
     assert sm.transition(SessionEvent.TTS_END)
     assert sm.state == SessionState.IDLE
-    # Illegal: IDLE cannot TTS_END
+    # Same-state stay must still be INFO (not only DEBUG) for file sinks
+    assert sm.transition(SessionEvent.LISTEN_START)
+    assert sm.transition(SessionEvent.LISTEN_START)
+    assert any("[session_fsm]" in m and "same_state=1" in m for m in log.info_msgs)
+    assert any("event=listen_start" in m and "to=LISTENING" in m for m in log.info_msgs)
+    # Illegal: IDLE cannot TTS_END after reset
+    assert sm.transition(SessionEvent.RESET)
     assert not sm.transition(SessionEvent.TTS_END)
     assert any("illegal_transition" in m for m in log.warn_msgs)
+    assert any("[session_fsm]" in m for m in log.warn_msgs)
 
 
 def test_play_only_matrix():
@@ -103,13 +110,12 @@ def test_peer_gates():
 
     assert can_start_think(SessionState.LISTENING)
     assert can_start_think(SessionState.IDLE)
-    assert not can_start_think(SessionState.SPEAKING)
+    assert can_start_think(SessionState.SPEAKING)  # barge-in allowed
     assert can_start_play(SessionState.THINKING)
     assert can_start_listen(SessionState.IDLE)
     assert parse_session_state("listening") == SessionState.LISTENING
     assert parse_session_state("THINKING") == SessionState.THINKING
     assert parse_session_state("aborted") == SessionState.IDLE
-
 
 def test_access_device_session_store():
     """Import access store with path pin."""

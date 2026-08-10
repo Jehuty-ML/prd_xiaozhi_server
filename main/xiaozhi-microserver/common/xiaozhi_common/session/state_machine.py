@@ -68,6 +68,8 @@ _COMMON_TRANSITIONS: Dict[Tuple[SessionState, SessionEvent], SessionState] = {
     (SessionState.THINKING, SessionEvent.CHAT_START): SessionState.THINKING,
     (SessionState.THINKING, SessionEvent.VOICE_END): SessionState.THINKING,
     (SessionState.THINKING, SessionEvent.TTS_END): SessionState.IDLE,
+    # Barge-in while LLM thinking: allow returning to listen
+    (SessionState.THINKING, SessionEvent.LISTEN_START): SessionState.LISTENING,
     (SessionState.SPEAKING, SessionEvent.TTS_START): SessionState.SPEAKING,
     (SessionState.SPEAKING, SessionEvent.TTS_END): SessionState.IDLE,
     (SessionState.SPEAKING, SessionEvent.ABORT): SessionState.IDLE,
@@ -273,7 +275,7 @@ class SessionStateMachine:
         key = (mode or "").strip().lower()
         if key not in SESSION_MACHINE_PROFILES:
             self._log_warning(
-                f"session={self.session_id} mode={self._mode} "
+                f"[session_fsm] session={self.session_id} mode={self._mode} "
                 f"event=switch_mode rejected=unknown_mode detail={key or '-'}"
             )
             return False
@@ -283,7 +285,7 @@ class SessionStateMachine:
         if reset_to_idle:
             self._state = SessionState.IDLE
         self._log_info(
-            f"session={self.session_id} mode={self._mode} "
+            f"[session_fsm] session={self.session_id} mode={self._mode} "
             f"event=switch_mode from_mode={prev} to_mode={key}"
         )
         return True
@@ -345,18 +347,19 @@ class SessionStateMachine:
         forced: bool,
     ) -> None:
         self._state = to_state
+        # Always INFO: same-state stays (e.g. LISTENING+listen_start) are still
+        # useful for tracing; file sinks often drop DEBUG.
         msg = (
-            f"session={self.session_id} mode={self._mode} event={event.value} "
-            f"from={from_state.value} to={to_state.value}"
+            f"[session_fsm] session={self.session_id} mode={self._mode} "
+            f"event={event.value} from={from_state.value} to={to_state.value}"
         )
         if detail:
             msg = f"{msg} detail={detail}"
         if forced:
             msg = f"{msg} forced=1"
         if from_state == to_state:
-            self._log_debug(msg)
-        else:
-            self._log_info(msg)
+            msg = f"{msg} same_state=1"
+        self._log_info(msg)
 
     def _warn_illegal(
         self,
@@ -367,8 +370,8 @@ class SessionStateMachine:
         reason: str,
     ) -> None:
         msg = (
-            f"session={self.session_id} mode={self._mode} event={event.value} "
-            f"from={from_state.value} rejected={reason}"
+            f"[session_fsm] session={self.session_id} mode={self._mode} "
+            f"event={event.value} from={from_state.value} rejected={reason}"
         )
         if detail:
             msg = f"{msg} detail={detail}"
@@ -403,12 +406,14 @@ class SessionStateMachine:
 
 
 def can_start_listen(state: Optional[SessionState]) -> bool:
-    """预处理开始收音：IDLE / SPEAKING（打断后听）/ DETECT。"""
+    """预处理开始收音：IDLE / SPEAKING（打断后听）/ DETECT / LISTENING。"""
     return state in (
         SessionState.IDLE,
         SessionState.SPEAKING,
         SessionState.DETECT,
         SessionState.LISTENING,
+        # THINKING: allow notify; access may reject — callers should abort first
+        SessionState.THINKING,
     )
 
 
@@ -418,11 +423,13 @@ def can_send_asr(state: Optional[SessionState]) -> bool:
 
 
 def can_start_think(state: Optional[SessionState]) -> bool:
-    """Agent 开聊：LISTEN / IDLE / DETECT。"""
+    """Agent 开聊：LISTEN / IDLE / DETECT；SPEAKING/THINKING 视为可打断后开聊。"""
     return state in (
         SessionState.LISTENING,
         SessionState.IDLE,
         SessionState.DETECT,
+        SessionState.SPEAKING,
+        SessionState.THINKING,
     )
 
 

@@ -174,12 +174,12 @@ def test_peer_gates_match_micro_service_rules():
         can_start_think,
     )
 
-    # think start: listen/idle/detect only
+    # think start: listen/idle/detect + barge-in from speaking/thinking
     assert can_start_think(SessionState.LISTENING) is True
     assert can_start_think(SessionState.IDLE) is True
     assert can_start_think(SessionState.DETECT) is True
-    assert can_start_think(SessionState.THINKING) is False
-    assert can_start_think(SessionState.SPEAKING) is False
+    assert can_start_think(SessionState.THINKING) is True
+    assert can_start_think(SessionState.SPEAKING) is True
     assert can_start_think(None) is False
 
     # play start: think/idle/speaking
@@ -191,11 +191,11 @@ def test_peer_gates_match_micro_service_rules():
     assert can_continue_play(SessionState.THINKING) is False
 
     assert can_start_listen(SessionState.IDLE) is True
-    assert can_start_listen(SessionState.THINKING) is False
+    assert can_start_listen(SessionState.THINKING) is True
 
 
 def test_gate_start_think_uses_access_state():
-    """gate_start_think must deny when GetDeviceState reports SPEAKING."""
+    """gate_start_think allows SPEAKING (barge-in); agent aborts before chat."""
     from xiaozhi import command_pb2
     from xiaozhi_common.session import SessionState, gate_start_think
 
@@ -208,7 +208,7 @@ def test_gate_start_think_uses_access_state():
         "xiaozhi_common.session.device_gates.command_pb2_grpc.AccessCommandServiceStub",
         return_value=stub,
     ):
-        assert gate_start_think(pool, "c1", message_id="m") is False
+        assert gate_start_think(pool, "c1", message_id="m") is True
 
     stub.GetDeviceState.return_value = command_pb2.DeviceStateResponse(
         code=0, msg="ok", state=SessionState.LISTENING.value

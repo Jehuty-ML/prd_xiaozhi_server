@@ -122,27 +122,71 @@ class AgentServicer(audio_pb2_grpc.AgentServiceServicer):
             lock.acquire()
         try:
             session.reset_abort()
+            from xiaozhi import audio_pb2_grpc
+            from xiaozhi_common.constants import SPEAKER_SERVICE
             from xiaozhi_common.session import (
-                gate_start_think,
+                SessionState,
+                fetch_device_state,
                 is_play_only_mode,
+                send_state_command,
             )
 
-            # micro_service-style gate: only LISTEN/IDLE/DETECT may start think
-            if not gate_start_think(self.pool, client_id, message_id=request.message_id):
-                if is_play_only_mode(session.config) or is_play_only_mode(
-                    session.session_sm
-                ):
-                    deny = session.play_only_deny_text()
-                    logger.info(f"Agent SendText play_only deny client={client_id}")
-                    return audio_pb2.TextResponse(code=0, msg="play_only", result=deny)
-                logger.info(f"Agent SendText gate deny client={client_id}")
-                return audio_pb2.TextResponse(
-                    code=2, msg="illegal_state", result=""
+            # Barge-in: previous turn left SPEAKING/THINKING → abort then chat.
+            state = fetch_device_state(
+                self.pool, client_id, message_id=request.message_id or ""
+            )
+            if state in (SessionState.SPEAKING, SessionState.THINKING):
+                logger.info(
+                    f"Agent SendText barge-in client={client_id} from={state}"
                 )
-            if not session.begin_chat():
+                send_state_command(
+                    self.pool,
+                    client_id,
+                    "abort",
+                    message_id=request.message_id or "",
+                )
+                try:
+                    stub = audio_pb2_grpc.AudioSpeakerServiceStub(
+                        self.pool.channel(SPEAKER_SERVICE)
+                    )
+                    stub.Abort(
+                        audio_pb2.SpeakerAbortRequest(
+                            message_id=request.message_id or "",
+                            client_id=client_id,
+                            reason="barge_in",
+                        ),
+                        metadata=self.pool.metadata(
+                            client_id, request.message_id or ""
+                        ),
+                        timeout=5,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(f"barge-in speaker abort skipped: {exc}")
+                session.reset_abort()
+
+            if is_play_only_mode(session.config) or is_play_only_mode(
+                session.session_sm
+            ):
                 deny = session.play_only_deny_text()
-                logger.info(f"Agent SendText chat_start reject client={client_id}")
+                logger.info(f"Agent SendText play_only deny client={client_id}")
                 return audio_pb2.TextResponse(code=0, msg="play_only", result=deny)
+
+            if not session.begin_chat():
+                # Access may still reject (play_only remote); try listen_start then chat
+                send_state_command(
+                    self.pool,
+                    client_id,
+                    "listen_start",
+                    message_id=request.message_id or "",
+                )
+                if not session.begin_chat():
+                    deny = session.play_only_deny_text()
+                    logger.info(
+                        f"Agent SendText chat_start reject client={client_id}"
+                    )
+                    return audio_pb2.TextResponse(
+                        code=0, msg="play_only", result=deny
+                    )
             reply = self.engine.chat(session, text)
             logger.info(
                 f"Agent SendText done client_id={client_id} "

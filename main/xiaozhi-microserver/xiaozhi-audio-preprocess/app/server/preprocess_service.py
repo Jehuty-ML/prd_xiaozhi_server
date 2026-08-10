@@ -27,12 +27,24 @@ class AudioPreprocessServicer(audio_pb2_grpc.AudioPreprocessServiceServicer):
     # ---- outbound helpers ----
 
     def _notify_listen(self, client_id: str, message_id: str, command: str) -> None:
+        from xiaozhi_common.session import send_state_command
+
         if command == "listen_start":
             if not gate_start_listen(self.pool, client_id, message_id=message_id):
+                # Stuck in THINKING etc. — abort then retry so VAD end can proceed
                 logger.info(
-                    f"preprocess skip listen_start gate deny client={client_id}"
+                    f"preprocess listen_start denied, barge-in abort client={client_id}"
                 )
-                return
+                send_state_command(
+                    self.pool, client_id, "abort", message_id=message_id
+                )
+                if not gate_start_listen(
+                    self.pool, client_id, message_id=message_id
+                ):
+                    logger.info(
+                        f"preprocess skip listen_start gate deny client={client_id}"
+                    )
+                    return
         try:
             stub = command_pb2_grpc.AccessCommandServiceStub(
                 self.pool.channel(ACCESS_SERVICE)
