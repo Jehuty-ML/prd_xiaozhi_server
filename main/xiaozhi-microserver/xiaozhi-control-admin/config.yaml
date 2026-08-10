@@ -58,7 +58,7 @@ xiaozhi:
 
 # 仅作本地缺省；启用 manager-api 后由智控台 server-base / agent-models 覆盖。
 selected_module:
-  ASR: StubASR
+  ASR: DoubaoASR
   TTS: EchoTTS
   LLM: EchoLLM
 

@@ -4,10 +4,10 @@ server:
   environment: development
 
 selected_module:
-  ASR: StubASR
+  # ASR: StubASR
   # ASR: FunASR
-  # ASR: Doubao
-  # ASR: DoubaoASR   # alias of Doubao (manager-api / monolith name)
+  ASR: DoubaoASR
+  # ASR: Doubao   # short alias of DoubaoASR
 
 ASR:
   StubASR:

@@ -20,6 +20,11 @@ MODULE_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
         "StubASR": ("StubASR",),
         "OpenAICompatASR": ("OpenAICompatASR",),
     },
+    "VAD": {
+        "SileroVAD": ("SileroVAD",),
+        "VAD_SileroVAD": ("SileroVAD", "VAD_SileroVAD"),
+        "StubVAD": ("StubVAD",),
+    },
     "TTS": {
         "Doubao": ("Doubao", "DoubaoTTS"),
         "DoubaoTTS": ("Doubao", "DoubaoTTS"),
@@ -43,6 +48,9 @@ SELECTED_NORMALIZE: dict[str, dict[str, str]] = {
     "ASR": {
         "DoubaoASR": "Doubao",
         "ASR_DoubaoASR": "Doubao",
+    },
+    "VAD": {
+        "VAD_SileroVAD": "SileroVAD",
     },
     "TTS": {
         "DoubaoTTS": "Doubao",

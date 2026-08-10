@@ -1,4 +1,4 @@
-"""Fetch per-device agent-models and push session config to agent."""
+"""Fetch per-device agent-models and push session config to agent / ASR / TTS peers."""
 
 from __future__ import annotations
 
@@ -10,8 +10,13 @@ from typing import Any
 import httpx
 from loguru import logger
 
-from xiaozhi import audio_pb2, audio_pb2_grpc
-from xiaozhi_common.constants import AGENT_SERVICE, SPEAKER_SERVICE
+from xiaozhi import admin_pb2, admin_pb2_grpc, audio_pb2, audio_pb2_grpc
+from xiaozhi_common.constants import (
+    AGENT_SERVICE,
+    PREPROCESS_SERVICE,
+    RECEIVER_SERVICE,
+    SPEAKER_SERVICE,
+)
 from xiaozhi_common.grpc.client import GrpcClientPool
 
 from app.ws.gateway_runtime import gateway_runtime
@@ -118,6 +123,65 @@ def push_session_config_sync(
     return resp.result or "ok"
 
 
+def _slice_provider_config(
+    private_config: dict[str, Any], *kinds: str
+) -> dict[str, Any]:
+    """Build a peer ApplyConfig payload with selected_module + provider blocks."""
+    selected = private_config.get("selected_module") or {}
+    out: dict[str, Any] = {"selected_module": {}}
+    if isinstance(selected, dict):
+        for kind in kinds:
+            if selected.get(kind):
+                out["selected_module"][kind] = selected[kind]
+    for kind in kinds:
+        block = private_config.get(kind)
+        if isinstance(block, dict) and block:
+            out[kind] = block
+    return out
+
+
+def push_peer_provider_config_sync(
+    pool: GrpcClientPool,
+    *,
+    service_name: str,
+    private_config: dict[str, Any],
+    kinds: tuple[str, ...],
+    reason: str = "agent_models",
+) -> bool:
+    """Push ASR/TTS/VAD slices from agent-models onto the owning microservice."""
+    payload = _slice_provider_config(private_config, *kinds)
+    if not payload.get("selected_module") and not any(
+        isinstance(payload.get(k), dict) for k in kinds
+    ):
+        return False
+    message_id = uuid.uuid4().hex
+    try:
+        stub = admin_pb2_grpc.ConfigApplyServiceStub(pool.channel(service_name))
+        resp = stub.ApplyConfig(
+            admin_pb2.ApplyConfigRequest(
+                message_id=message_id,
+                config_json=json.dumps(payload, ensure_ascii=False),
+                reason=reason,
+            ),
+            metadata=pool.metadata(message_id=message_id),
+            timeout=15,
+        )
+        if int(resp.code) != 0:
+            logger.warning(
+                f"ApplyConfig to {service_name} failed: {resp.msg} kinds={kinds}"
+            )
+            return False
+        selected = payload.get("selected_module") or {}
+        logger.info(
+            f"agent-models → {service_name} applied kinds={kinds} "
+            f"selected={selected}"
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"ApplyConfig to {service_name} error: {exc}")
+        return False
+
+
 def speak_bind_prompt_sync(pool: GrpcClientPool, client_id: str, bind_code: str) -> None:
     code = "".join(ch for ch in str(bind_code) if ch.isdigit()) or str(bind_code)
     text = f"请登录控制面板，输入{code}，绑定设备。"
@@ -145,11 +209,17 @@ async def bind_device_on_connect(
     client_id: str,
     bind_id: str,
 ) -> dict[str, Any]:
-    """On WS connect: pull agent-models and apply to agent session.
+    """On WS connect: pull agent-models and apply to agent + ASR/TTS/VAD peers.
 
-    Returns status dict: {ok, need_bind, bind_code, llm, error}.
+    Returns status dict: {ok, need_bind, bind_code, llm, asr, error}.
     """
-    out: dict[str, Any] = {"ok": False, "need_bind": False, "bind_code": "", "llm": ""}
+    out: dict[str, Any] = {
+        "ok": False,
+        "need_bind": False,
+        "bind_code": "",
+        "llm": "",
+        "asr": "",
+    }
     if not manager_api_enabled():
         out["ok"] = True
         out["skipped"] = True
@@ -184,6 +254,37 @@ async def bind_device_on_connect(
         logger.warning(f"agent-models pull failed mac={mac}: {exc}")
         return out
 
+    selected = private.get("selected_module") or {}
+    out["asr"] = str((selected or {}).get("ASR") or "")
+    out["llm"] = str((selected or {}).get("LLM") or "")
+
+    # Push provider configs to the services that actually run them.
+    # (Previously only agent got ApplySessionConfig → ASR stayed StubASR.)
+    await asyncio.to_thread(
+        push_peer_provider_config_sync,
+        pool,
+        service_name=RECEIVER_SERVICE,
+        private_config=private,
+        kinds=("ASR",),
+        reason=f"agent_models:{mac}",
+    )
+    await asyncio.to_thread(
+        push_peer_provider_config_sync,
+        pool,
+        service_name=SPEAKER_SERVICE,
+        private_config=private,
+        kinds=("TTS",),
+        reason=f"agent_models:{mac}",
+    )
+    await asyncio.to_thread(
+        push_peer_provider_config_sync,
+        pool,
+        service_name=PREPROCESS_SERVICE,
+        private_config=private,
+        kinds=("VAD",),
+        reason=f"agent_models:{mac}",
+    )
+
     try:
         result = await asyncio.to_thread(
             push_session_config_sync,
@@ -193,15 +294,14 @@ async def bind_device_on_connect(
             private_config=private,
             reason="ws_connect",
         )
-        selected = (private.get("selected_module") or {}).get("LLM") or ""
         out["ok"] = True
-        out["llm"] = selected
         out["result"] = result
         connection_manager.update_meta(
             bind_id, need_bind=False, bind_code="", agent_bound=True
         )
         logger.info(
-            f"Device agent-models applied mac={mac} client={bind_id} LLM={selected}"
+            f"Device agent-models applied mac={mac} client={bind_id} "
+            f"LLM={out['llm']} ASR={out['asr']}"
         )
     except Exception as exc:  # noqa: BLE001
         out["error"] = str(exc)

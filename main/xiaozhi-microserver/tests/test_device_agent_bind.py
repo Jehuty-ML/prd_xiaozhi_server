@@ -139,3 +139,37 @@ def test_apply_session_config_creates_llm_session():
     )
     assert session.llm is llm
     assert (session.config.get("selected_module") or {}).get("LLM")
+
+
+def test_slice_provider_config_for_receiver():
+    _ensure_paths(COMMON, GENERATED, ACCESS_ROOT)
+    # Prefer access app over agent (previous test may have pinned agent).
+    agent = str(AGENT_ROOT.resolve())
+    if agent in sys.path:
+        sys.path.remove(agent)
+    for key in list(sys.modules):
+        if key == "app" or key.startswith("app."):
+            del sys.modules[key]
+    from app.ws.device_bind import _slice_provider_config
+
+    private = {
+        "selected_module": {
+            "ASR": "ASR_DoubaoASR",
+            "TTS": "TTS_DoubaoTTS",
+            "LLM": "LLM_DoubaoLLM",
+        },
+        "ASR": {
+            "ASR_DoubaoASR": {
+                "type": "doubao",
+                "appid": "1",
+                "access_token": "t",
+            }
+        },
+        "TTS": {"TTS_DoubaoTTS": {"type": "doubao"}},
+        "LLM": {"LLM_DoubaoLLM": {"type": "openai"}},
+    }
+    sliced = _slice_provider_config(private, "ASR")
+    assert sliced["selected_module"] == {"ASR": "ASR_DoubaoASR"}
+    assert "ASR_DoubaoASR" in sliced["ASR"]
+    assert "TTS" not in sliced
+    assert "LLM" not in sliced

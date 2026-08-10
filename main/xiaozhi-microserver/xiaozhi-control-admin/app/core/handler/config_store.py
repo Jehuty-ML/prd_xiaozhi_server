@@ -189,7 +189,7 @@ class ConfigStore:
                 "timezone_offset": 8,
             },
             "selected_module": {
-                "ASR": "StubASR",
+                "ASR": "DoubaoASR",
                 "TTS": "EchoTTS",
                 "LLM": "EchoLLM",
             },
