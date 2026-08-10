@@ -459,11 +459,12 @@ async def detect_timeout_watchdog(conn: object):
                 pass
 
 
-def clear_speak_status(conn: object) -> None:
+def clear_speak_status(conn: object, *, end_broadcast: bool = False) -> None:
     """TTS 结束或打断后清讲话态；已非 SPEAKING 时不触发 TTS_END。
 
     若处于管理台广播会话，仅当结束的是广播句本身时才恢复广播前 mode。
-    嵌套的降级/其它 TTS（sentence_id 已变）不得误触发 _finish_broadcast_speak。
+    嵌套 TTS（sentence_id 已变）默认不结束广播；abort 须传 end_broadcast=True，
+    否则 sentence_id 被抢写后会永久卡在临时 play_only。
     """
     sm: SessionStateMachine = conn.session_sm
     if sm.state == SessionState.SPEAKING:
@@ -473,7 +474,8 @@ def clear_speak_status(conn: object) -> None:
 
     broadcast_sid = getattr(conn, "_broadcast_sentence_id", None)
     if (
-        getattr(conn, "_broadcast_speak_active", False)
+        not end_broadcast
+        and getattr(conn, "_broadcast_speak_active", False)
         and broadcast_sid
         and getattr(conn, "sentence_id", None) != broadcast_sid
     ):
