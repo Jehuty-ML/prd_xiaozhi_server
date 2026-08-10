@@ -1,5 +1,28 @@
 # xiaozhi-esp32-server · 生产加固分支
 
+> **先选架构，再部署。** 本仓库在生产加固基线之上提供两套运行时：当前 **`main` 即为单体架构**；另有微服务分支。请按实际规模与运维能力选用，**不必默认上微服务**。
+
+## 架构选用（必读）
+
+| 分支 | 运行时 | 适合谁 | 代价 / 收益 |
+|------|--------|--------|-------------|
+| **`main`（当前分支 · 单体）** | `main/xiaozhi-server` | 业务刚起步、设备量不大、希望少人维护 | **部署与排障成本低**；单进程即可跑通全链路。需要扩容时，也可多实例 + 负载均衡，并配合智控台 / Redis 注册做一定程度的横向扩展 |
+| [`Microservices_architecture`](https://github.com/Jehuty-ML/prd_xiaozhi_server/tree/Microservices_architecture) | 六微服务 `main/xiaozhi-microserver` | 高并发接入、要按模块弹性扩容、接入层与 ASR/LLM/TTS 需隔离 | **运维与联调成本更高**（多进程、发现、跨服务契约）；换来的是按瓶颈单独扩 access / receiver / agent / speaker 等，以及更好的故障隔离 |
+
+**怎么选：**
+
+1. 多数团队起步应优先留在 **`main`（单体）**——能更快交付，也够支撑相当一段时间的并发。
+2. 明确遇到「单机连接/推理互相拖垮」或「必须按语音链路分段扩容」时，再切 **`Microservices_architecture`**。
+
+```bash
+# 微服务（高并发 / 弹性扩容）时再切换
+git checkout Microservices_architecture
+```
+
+更细的取舍说明见微服务分支内 [`main/xiaozhi-microserver/README.md`](https://github.com/Jehuty-ML/prd_xiaozhi_server/blob/Microservices_architecture/main/xiaozhi-microserver/README.md)。
+
+---
+
 ## 致谢与定位
 
 本仓库的业务能力与工程基础，来自开源项目 [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) 及小智生态各方贡献者。
@@ -48,12 +71,12 @@
 
 ```
 main/
-  xiaozhi-server/      对话 WebSocket 网关（加固重点）:8000 / HTTP:8003
+  xiaozhi-server/      单体对话网关（本分支主运行时）:8000 / HTTP:8003
   manager-api/         智控台 API :8002
   manager-web/         智控台 Web :8001
   manager-mobile/      移动智控台
   digital-human/       数字人联调
-  xiaozhi-microserver/ 微服务拆分（演进中，不替代上述加固）
+  xiaozhi-microserver/ 六微服务代码（以 Microservices_architecture 分支为准）
 ```
 
 语音交互、多 Provider、插件 / MCP / IoT、智控台、OTA、声纹与知识库等业务能力均予保留。
