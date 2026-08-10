@@ -1999,8 +1999,8 @@ class ConnectionHandler:
     async def _detect_timeout_watchdog(self):
         await detect_timeout_watchdog(self)
 
-    def clearSpeakStatus(self):
-        clear_speak_status(self)
+    def clearSpeakStatus(self, end_broadcast: bool = False):
+        clear_speak_status(self, end_broadcast=end_broadcast)
         self.logger.bind(tag=TAG).debug("清除服务端讲话状态")
 
     async def _cancel_tracked_tasks(self):
