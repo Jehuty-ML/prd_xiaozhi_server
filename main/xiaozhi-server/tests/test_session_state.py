@@ -21,6 +21,7 @@ from core.utils.session_state import (
     is_play_only_mode,
     resolve_session_mode,
     speak_broadcast_text,
+    speak_play_only_denied,
     sync_legacy_flags,
     transition_session,
 )
@@ -495,7 +496,7 @@ class SessionConnectionWiringTests(unittest.IsolatedAsyncioTestCase):
 
         spoken = {"text": None}
 
-        def _fake_speak(conn, text):
+        def _fake_speak(conn, text, **_kwargs):
             spoken["text"] = text
 
         import sys
@@ -521,6 +522,218 @@ class SessionConnectionWiringTests(unittest.IsolatedAsyncioTestCase):
                 sys.modules.pop("core.handle.intentHandler", None)
             else:
                 sys.modules["core.handle.intentHandler"] = prev
+
+    async def test_overlapping_broadcast_preserves_restore_mode(self):
+        """重叠广播不得把 restore 覆盖成临时 play_only，结束后应回 common。"""
+        self.conn.websocket = object()
+        self.conn._closed = False
+        self.conn.clear_queues = lambda: None
+        self.conn.config = {"session_state": {"mode": "common"}}
+        self.conn.tts = object()
+        self.conn.client_abort = False
+
+        spoken = []
+
+        def _fake_speak(conn, text, **_kwargs):
+            spoken.append(text)
+
+        import sys
+        import types
+
+        fake_intent = types.ModuleType("core.handle.intentHandler")
+        fake_intent.speak_txt = _fake_speak
+        prev_intent = sys.modules.get("core.handle.intentHandler")
+        # abortHandle 依赖 websocket.send；用桩跳过真实 abort 模块
+        fake_abort = types.ModuleType("core.handle.abortHandle")
+
+        async def _fake_abort(conn):
+            conn.client_abort = True
+            if hasattr(conn, "clear_queues"):
+                conn.clear_queues()
+            conn.session_sm.transition(SessionEvent.ABORT, detail="test")
+            # 模拟 clearSpeakStatus：若 active 已摘掉则不会还原 mode
+            clear_speak_status(conn)
+
+        fake_abort.handleAbortMessage = _fake_abort
+        prev_abort = sys.modules.get("core.handle.abortHandle")
+        sys.modules["core.handle.intentHandler"] = fake_intent
+        sys.modules["core.handle.abortHandle"] = fake_abort
+        try:
+            ok1 = await speak_broadcast_text(self.conn, "广播A")
+            self.assertTrue(ok1)
+            self.assertEqual(self.conn._broadcast_restore_mode, DEFAULT_SESSION_MODE)
+            self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
+
+            ok2 = await speak_broadcast_text(self.conn, "广播B")
+            self.assertTrue(ok2)
+            # 关键：仍是首次快照的 common，而非临时 play_only
+            self.assertEqual(self.conn._broadcast_restore_mode, DEFAULT_SESSION_MODE)
+            self.assertTrue(self.conn._broadcast_speak_active)
+            self.assertEqual(spoken, ["广播A", "广播B"])
+            self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
+
+            clear_speak_status(self.conn)
+            self.assertFalse(getattr(self.conn, "_broadcast_speak_active", False))
+            self.assertEqual(self.conn.session_sm.mode, DEFAULT_SESSION_MODE)
+        finally:
+            if prev_intent is None:
+                sys.modules.pop("core.handle.intentHandler", None)
+            else:
+                sys.modules["core.handle.intentHandler"] = prev_intent
+            if prev_abort is None:
+                sys.modules.pop("core.handle.abortHandle", None)
+            else:
+                sys.modules["core.handle.abortHandle"] = prev_abort
+
+    async def test_hot_reload_mode_during_broadcast_updates_restore(self):
+        """广播中热更新 mode：只改恢复目标，结束后与配置一致。"""
+        self.conn.websocket = object()
+        self.conn._closed = False
+        self.conn.clear_queues = lambda: None
+        self.conn.config = {"session_state": {"mode": "common"}}
+
+        ok = await apply_session_mode(
+            self.conn, PLAY_ONLY_SESSION_MODE, force_interrupt=True
+        )
+        self.assertTrue(ok)
+        self.conn._broadcast_speak_active = True
+        self.conn._broadcast_restore_mode = DEFAULT_SESSION_MODE
+        self.assertTrue(
+            transition_session(
+                self.conn, SessionEvent.TTS_START, detail="broadcast_speak"
+            )
+        )
+        self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
+
+        # 热更新到 play_only：当前已是临时 play_only，应只改 restore
+        ok = await apply_session_mode(
+            self.conn, PLAY_ONLY_SESSION_MODE, force_interrupt=True
+        )
+        self.assertTrue(ok)
+        self.assertEqual(self.conn._broadcast_restore_mode, PLAY_ONLY_SESSION_MODE)
+        self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
+        self.assertEqual(self.conn.session_sm.state, SessionState.SPEAKING)
+
+        clear_speak_status(self.conn)
+        self.assertFalse(getattr(self.conn, "_broadcast_speak_active", False))
+        self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
+        self.assertEqual(
+            self.conn.config.get("session_state", {}).get("mode"),
+            PLAY_ONLY_SESSION_MODE,
+        )
+
+    async def test_deny_during_broadcast_does_not_finish_play_only(self):
+        """广播中唤醒降级不得结束临时 play_only（否则 mute 被一句唤醒拆掉）。"""
+        self.conn.websocket = object()
+        self.conn._closed = False
+        self.conn.clear_queues = lambda: None
+        self.conn.config = {"session_state": {"mode": "common"}}
+        self.conn.tts = object()
+        self.conn.stop_event = None
+        self.conn.client_abort = False
+        self.conn.sentence_id = None
+
+        spoken = []
+
+        def _fake_speak(conn, text, **_kwargs):
+            spoken.append(text)
+
+        import sys
+        import types
+
+        fake_intent = types.ModuleType("core.handle.intentHandler")
+        fake_intent.speak_txt = _fake_speak
+        prev = sys.modules.get("core.handle.intentHandler")
+        sys.modules["core.handle.intentHandler"] = fake_intent
+        try:
+            ok = await speak_broadcast_text(self.conn, "紧急通知")
+            self.assertTrue(ok)
+            broadcast_sid = self.conn._broadcast_sentence_id
+            self.assertTrue(self.conn._broadcast_speak_active)
+            self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
+
+            # 广播中尝试对话：应忽略降级 TTS，保持广播会话
+            speak_play_only_denied(self.conn)
+            self.assertEqual(spoken, ["紧急通知"])
+            self.assertEqual(self.conn.sentence_id, broadcast_sid)
+            self.assertTrue(self.conn._broadcast_speak_active)
+            self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
+
+            # 即便误触发嵌套 clear（sentence_id 被改掉），也不得还原 common
+            self.conn.sentence_id = "deny-sid"
+            clear_speak_status(self.conn)
+            self.assertTrue(self.conn._broadcast_speak_active)
+            self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
+
+            # 广播句本身结束：才恢复 common
+            self.conn.sentence_id = broadcast_sid
+            clear_speak_status(self.conn)
+            self.assertFalse(self.conn._broadcast_speak_active)
+            self.assertEqual(self.conn.session_sm.mode, DEFAULT_SESSION_MODE)
+        finally:
+            if prev is None:
+                sys.modules.pop("core.handle.intentHandler", None)
+            else:
+                sys.modules["core.handle.intentHandler"] = prev
+
+    async def test_abort_forces_broadcast_finish_after_sentence_id_hijack(self):
+        """sentence_id 被嵌套 TTS 改写后，abort 仍须能结束临时 play_only。"""
+        self.conn.websocket = object()
+        self.conn._closed = False
+        self.conn.clear_queues = lambda: None
+        self.conn.config = {"session_state": {"mode": "common"}}
+        self.conn.session_sm.switch_mode(PLAY_ONLY_SESSION_MODE, reset_to_idle=True)
+        self.conn._broadcast_restore_mode = DEFAULT_SESSION_MODE
+        self.conn._broadcast_speak_active = True
+        self.conn._broadcast_sentence_id = "bcast"
+        self.conn.sentence_id = "bcast"
+        self.assertTrue(
+            transition_session(
+                self.conn, SessionEvent.TTS_START, detail="broadcast_speak"
+            )
+        )
+        # 模拟唤醒缓存等路径抢写 sentence_id
+        self.conn.sentence_id = "nested-wakeup"
+        clear_speak_status(self.conn)
+        self.assertTrue(self.conn._broadcast_speak_active)
+        self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
+
+        clear_speak_status(self.conn, end_broadcast=True)
+        self.assertFalse(self.conn._broadcast_speak_active)
+        self.assertEqual(self.conn.session_sm.mode, DEFAULT_SESSION_MODE)
+
+    async def test_soft_barge_in_window_hot_reload_updates_restore(self):
+        """重叠广播软打断窗口内热更新 play_only，结束后不得还原 common。"""
+        self.conn.websocket = object()
+        self.conn._closed = False
+        self.conn.clear_queues = lambda: None
+        self.conn.config = {"session_state": {"mode": "common"}}
+        self.conn.tts = object()
+        self.conn.client_abort = False
+
+        # 模拟广播进行中 + 软打断窗口（active 已摘掉）
+        self.conn.session_sm.switch_mode(PLAY_ONLY_SESSION_MODE, reset_to_idle=True)
+        self.conn._broadcast_restore_mode = DEFAULT_SESSION_MODE
+        self.conn._broadcast_speak_active = False
+        self.conn._broadcast_soft_barge_in = True
+
+        ok = await apply_session_mode(
+            self.conn, PLAY_ONLY_SESSION_MODE, force_interrupt=True
+        )
+        self.assertTrue(ok)
+        self.assertEqual(self.conn._broadcast_restore_mode, PLAY_ONLY_SESSION_MODE)
+
+        self.conn._broadcast_soft_barge_in = False
+        self.conn._broadcast_speak_active = True
+        self.conn._broadcast_sentence_id = "bcast"
+        self.conn.sentence_id = "bcast"
+        self.assertTrue(
+            transition_session(
+                self.conn, SessionEvent.TTS_START, detail="broadcast_speak"
+            )
+        )
+        clear_speak_status(self.conn)
+        self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
 
 
 if __name__ == "__main__":

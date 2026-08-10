@@ -128,17 +128,20 @@ async def startToChat(conn: "ConnectionHandler", text):
     # 首先进行意图分析，使用实际文本内容
     intent_handled = await handle_user_intent(conn, actual_text)
 
+    # await 之后可能已被切到 play_only（配置热更新/广播），需再校验。
+    # 必须在 intent_handled 早退之前：否则意图路径会绕过 play_only 门禁。
+    if is_play_only_mode(conn):
+        # 意图路径若已播降级话并返回 True，避免重复播报
+        if not intent_handled:
+            conn.logger.bind(tag=TAG).info(
+                "play_only 拒绝 startToChat（await 后复核），播报降级话术"
+            )
+            speak_play_only_denied(conn)
+        return False
+
     if intent_handled:
         # 如果意图已被处理，不再进行聊天
         return True
-
-    # await 之后可能已被切到 play_only（配置热更新/广播），需再校验
-    if is_play_only_mode(conn):
-        conn.logger.bind(tag=TAG).info(
-            "play_only 拒绝 startToChat（await 后复核），播报降级话术"
-        )
-        speak_play_only_denied(conn)
-        return False
 
     # 意图未被处理，继续常规聊天流程，使用实际文本内容
     if not conn.transition_session(SessionEvent.CHAT_START, detail="start_to_chat"):
@@ -146,7 +149,25 @@ async def startToChat(conn: "ConnectionHandler", text):
             "CHAT_START 被拒绝，跳过本轮 chat"
         )
         return False
-    await send_stt_message(conn, actual_text)
+    try:
+        await send_stt_message(conn, actual_text)
+    except Exception:
+        # STT/TTS start 发送失败时回滚，避免永久卡在 THINKING（无法 DETECT/LISTEN）
+        if conn.session_sm.is_in(SessionState.THINKING):
+            conn.transition_session(SessionEvent.RESET, detail="stt_send_failed")
+        raise
+
+    # send_stt await 期间可能已切入广播/play_only；禁止清 abort 并启动 chat（会抢写 sentence_id）
+    if is_play_only_mode(conn) or getattr(conn, "_broadcast_speak_active", False) or getattr(
+        conn, "_broadcast_soft_barge_in", False
+    ):
+        conn.logger.bind(tag=TAG).info(
+            "play_only/广播中拒绝 startToChat（STT await 后复核），不启动 chat"
+        )
+        if conn.session_sm.is_in(SessionState.THINKING):
+            conn.transition_session(SessionEvent.RESET, detail="stt_after_play_only")
+        speak_play_only_denied(conn)
+        return False
 
     # 准备开始新会话
     conn.client_abort = False

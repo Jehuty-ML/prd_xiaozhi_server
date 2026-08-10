@@ -116,15 +116,40 @@ async def checkWakeupWords(conn: "ConnectionHandler", text):
 
     # 获取音频数据
     opus_packets = await audio_to_data(response.get("file_path"), use_cache=False)
+    # await 期间可能已被广播切到 play_only；禁止再改 sentence_id 顶掉广播会话
+    if is_play_only_mode(conn) or getattr(
+        conn, "_broadcast_speak_active", False
+    ) or getattr(conn, "_broadcast_soft_barge_in", False):
+        conn.logger.bind(tag=TAG).info(
+            "play_only/广播中拒绝唤醒缓存回复（await 后复核）"
+        )
+        speak_play_only_denied(conn)
+        return True
+
     # 播放唤醒词回复
     conn.client_abort = False
 
     # 将唤醒词回复视为新会话，生成新的 sentence_id，确保流控器重置
     conn.sentence_id = str(uuid.uuid4().hex)
+    wakeup_sid = conn.sentence_id
 
     conn.logger.bind(tag=TAG).info(f"播放唤醒词回复: {response.get('text')}")
-    await sendAudioMessage(conn, SentenceType.FIRST, opus_packets, response.get("text"))
-    await sendAudioMessage(conn, SentenceType.LAST, [], None)
+    await sendAudioMessage(
+        conn, SentenceType.FIRST, opus_packets, response.get("text"), sentence_id=wakeup_sid
+    )
+    # FIRST→LAST 之间广播可能改写 conn.sentence_id；必须绑定 sid，
+    # 否则 LAST 的 stop/clearSpeakStatus 会误结束临时 play_only
+    if is_play_only_mode(conn) or getattr(
+        conn, "_broadcast_speak_active", False
+    ) or getattr(conn, "_broadcast_soft_barge_in", False):
+        conn.logger.bind(tag=TAG).info(
+            "play_only/广播中拒绝唤醒缓存收尾（FIRST await 后复核）"
+        )
+        speak_play_only_denied(conn)
+        return True
+    await sendAudioMessage(
+        conn, SentenceType.LAST, [], None, sentence_id=wakeup_sid
+    )
 
     # 补充对话
     conn.dialogue.put(Message(role="assistant", content=response.get("text")))

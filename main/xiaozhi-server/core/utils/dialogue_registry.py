@@ -191,13 +191,38 @@ def resolve_instance_id(config: Optional[Dict[str, Any]] = None) -> str:
 
 
 def resolve_websocket_address(config: Optional[Dict[str, Any]] = None) -> str:
-    """本实例对外 WebSocket 地址（供 OTA 下发）。"""
+    """本实例对外 WebSocket 地址（供 OTA / Redis 注册心跳）。
+
+    优先级：
+    1. server.registry.advertise_websocket（或 websocket_address / websocket）
+    2. 环境变量 XIAOZHI_WEBSOCKET_URL
+    3. 单值 server.websocket
+    4. 本机 IP + port 推导
+
+    注意：server.websocket 含分号时是静态集群选路列表，不能把首项挂到
+    每个存活实例上——否则实例 B 心跳仍广告 A，A 宕机后 OTA 仍下发死地址。
+    """
     config = config or {}
     server = config.get("server") if isinstance(config.get("server"), dict) else {}
+    registry = (
+        server.get("registry") if isinstance(server.get("registry"), dict) else {}
+    )
+
+    for key in ("advertise_websocket", "websocket_address", "websocket"):
+        adv = str(registry.get(key) or "").strip()
+        if adv and "你" not in adv and ";" not in adv:
+            return adv
+
+    env_ws = (os.environ.get("XIAOZHI_WEBSOCKET_URL") or "").strip()
+    if env_ws and "你" not in env_ws and ";" not in env_ws:
+        return env_ws
+
     ws = str(server.get("websocket") or "").strip()
     if ws and "你" not in ws:
-        # 多地址配置时取第一个；多实例应各自配自己的公网/局域网地址
-        return ws.split(";")[0].strip()
+        if ";" in ws:
+            port = int(server.get("port", 8000) or 8000)
+            return f"ws://{_get_local_ip()}:{port}/xiaozhi/v1/"
+        return ws
     port = int(server.get("port", 8000) or 8000)
     return f"ws://{_get_local_ip()}:{port}/xiaozhi/v1/"
 
@@ -352,6 +377,32 @@ class DialogueServerRegistrar:
         info.instance_id = self._instance_id
         return info
 
+    def refresh_config(self, config: Dict[str, Any]) -> None:
+        """热更新后刷新配置快照（保留 instance_id）。
+
+        websocket / registry Redis 等变更会体现在后续心跳；Redis 连接参数
+        变化时丢弃旧 client，下次心跳重建。
+        """
+        old = self._settings
+        self._config = config or {}
+        self._settings = get_registry_settings(self._config)
+        self._info = self._build_info()
+        if (
+            old.redis_url != self._settings.redis_url
+            or old.redis_host != self._settings.redis_host
+            or old.redis_port != self._settings.redis_port
+            or old.redis_password != self._settings.redis_password
+            or old.redis_db != self._settings.redis_db
+            or old.redis_socket_timeout != self._settings.redis_socket_timeout
+        ):
+            self._registry = None
+
+    async def push_heartbeat(self) -> None:
+        """立即上报一次心跳（热更新 websocket 后避免 OTA 长时间拿旧地址）。"""
+        if not self._settings.enabled:
+            return
+        await self._beat_once()
+
     def _connect(self) -> RedisDialogueServerRegistry:
         client = build_redis_client(
             url=self._settings.redis_url,
@@ -414,8 +465,8 @@ class DialogueServerRegistrar:
         _clear_active(self)
 
     async def _heartbeat_loop(self) -> None:
-        interval = self._settings.heartbeat_interval_seconds
         while not self._stop.is_set():
+            interval = self._settings.heartbeat_interval_seconds
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=interval)
                 break

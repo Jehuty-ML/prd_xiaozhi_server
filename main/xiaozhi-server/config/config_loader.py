@@ -1,4 +1,5 @@
 import os
+import uuid
 import asyncio
 import yaml
 from collections.abc import Mapping
@@ -10,6 +11,44 @@ from config.manage_api_client import (
     DeviceNotFoundException,
     DeviceBindException,
 )
+
+
+def is_valid_auth_key(key) -> bool:
+    """占位文案（含「你」）或空串视为无效。"""
+    if key is None:
+        return False
+    text = str(key).strip()
+    return bool(text) and "你" not in text
+
+
+def resolve_auth_key(
+    config,
+    *,
+    previous_key: str = "",
+    allow_generate: bool = True,
+) -> str:
+    """解析 server.auth_key。
+
+    优先级：server.auth_key > manager-api.secret > previous_key > UUID（仅启动）。
+    热更新应传 previous_key=内存中有效密钥、allow_generate=False，
+    避免 YAML 未写死 auth_key 时被清空或每次换钥。
+    """
+    server = (config or {}).get("server") or {}
+    key = server.get("auth_key", "") if isinstance(server, dict) else ""
+    if is_valid_auth_key(key):
+        return str(key).strip()
+
+    manager_api = (config or {}).get("manager-api") or {}
+    key = manager_api.get("secret", "") if isinstance(manager_api, dict) else ""
+    if is_valid_auth_key(key):
+        return str(key).strip()
+
+    if is_valid_auth_key(previous_key):
+        return str(previous_key).strip()
+
+    if allow_generate:
+        return uuid.uuid4().hex
+    return ""
 
 
 def get_project_dir():
