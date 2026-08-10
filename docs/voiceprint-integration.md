@@ -55,8 +55,8 @@ telnet 127.0.0.1 3306
 注意是将`xiaozhi-esp32-server-db`下面的`expose`改成`ports`。改完后，需要重新启动。以下是重启mysql的命令：
 
 ```
-# 进入你docker-compose_all.yml所在的文件夹，例如我的是xiaozhi-server
-cd xiaozhi-server
+# 进入你docker-compose_all.yml所在的文件夹，例如我的是xiaozhi-microserver
+cd xiaozhi-microserver
 docker compose -f docker-compose_all.yml down
 docker compose -f docker-compose.yml up -d
 ```
@@ -193,7 +193,7 @@ http://192.168.1.25:8005/voiceprint/health?key=abcd
 # 3、最简化部署时，怎么配置声纹识别
 
 ## 第一步 配置接口
-打开 `xiaozhi-server/data/.config.yaml` 文件（如果没有需要创建），然后添加/修改以下内容：
+打开 `xiaozhi-microserver/xiaozhi-control-admin/data/.config.yaml` 文件（如果没有需要创建），然后添加/修改以下内容：
 
 ```
 # 声纹识别配置

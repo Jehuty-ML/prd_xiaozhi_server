@@ -156,7 +156,7 @@ Spearheaded by Professor Siyuan Liu's Team (South China University of Technology
 1、本项目为开源软件，本软件与对接的任何第三方API服务商（包括但不限于语音识别、大模型、语音合成等平台）均不存在商业合作关系，不为其服务质量及资金安全提供任何形式的担保。
 建议使用者优先选择持有相关业务牌照的服务商，并仔细阅读其服务协议及隐私政策。本软件不托管任何账户密钥、不参与资金流转、不承担充值资金损失风险。
 
-2、本分支已做生产级加固；按[《生产部署》](./docs/Production.md)配置后可用于自托管生产（**第六期起主运行时为** [`main/xiaozhi-microserver`](./main/xiaozhi-microserver)）；默认开发配置勿公网暴露。历史单体 `xiaozhi-server` 已退役，见其 `RETIRED.md`。
+2、本分支已做生产级加固；按[《生产部署》](./docs/Production.md)配置后可用于自托管生产（主运行时为 [`main/xiaozhi-microserver`](./main/xiaozhi-microserver) 六微服务）；默认开发配置勿公网暴露。单体 `xiaozhi-server` 在其他分支维护，本分支不保留。
 
 ---
 
@@ -212,7 +212,7 @@ Websocket接口地址: wss://2662r3426b.vicp.fun/xiaozhi/v1/
 | 工具名称 | 位置 | 使用方法 | 功能说明 |
 |:---:|:---|:---:|:---:|
 | 音频交互测试工具 | main》digital-human》index.html | 在 `main/digital-human` 执行 `python start.py` 后访问 `http://127.0.0.1:8006/index.html` | 测试音频播放和接收功能，验证Python端音频处理是否正常 |
-| 模型响应测试工具 | main》xiaozhi-server》performance_tester.py | 执行 `python performance_tester.py` | 测试ASR(语音识别)、LLM(大模型)、VLLM(视觉模型)、TTS(语音合成)三个核心模块的响应速度 |
+| 模型响应测试工具 | 见其他分支单体；本分支用 `main/xiaozhi-microserver/scripts/*_smoke.py` | 执行冒烟脚本 | 联调 WS / OTA / Agent 协议路径 |
 
 > 💡 提示：测试模型速度时，只会测试配置了密钥的模型。
 

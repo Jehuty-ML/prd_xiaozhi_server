@@ -1,11 +1,14 @@
 # 技术文档：`xiaozhi-esp32-server`
 
+> **本分支主运行时**：[`xiaozhi-microserver`](./xiaozhi-microserver)（六微服务）。  
+> 历史单体 `xiaozhi-microserver` 在其他分支维护。部署见 [`docs/Deployment.md`](../docs/Deployment.md) / [`docs/Production.md`](../docs/Production.md)。
+
 **目录：**
 
 1.  [引言](#1-引言)
 2.  [整体架构](#2-整体架构)
 3.  [核心组件深度剖析](#3-核心组件深度剖析)
-    *   [3.1. `xiaozhi-server` (核心AI引擎 - Python实现)](#31-xiaozhi-server-核心ai引擎---python实现)
+    *   [3.1. `xiaozhi-microserver` (语音网关 - 六微服务)](#31-xiaozhi-microserver-语音网关---六微服务)
     *   [3.2. `manager-api` (管理后端 - Java Spring Boot实现)](#32-manager-api-管理后端---java-spring-boot实现)
     *   [3.3. `manager-web` (Web管理前端 - Vue.js实现)](#33-manager-web-web管理前端---vuejs实现)
     *   [3.4. `manager-mobile` (移动管理端 - uni-app+Vue3实现)](#34-manager-mobile-移动管理端---uni-appvue3实现)
@@ -28,11 +31,11 @@
 1.  **ESP32 硬件 (客户端设备):**
     这是终端用户直接与之交互的物理智能硬件设备。其主要职责包括：
     *   捕捉用户的语音指令。
-    *   将捕捉到的原始音频数据安全地发送至 `xiaozhi-server` 进行处理。
-    *   接收来自 `xiaozhi-server` 合成的语音回复，并通过扬声器播放给用户。
-    *   根据从 `xiaozhi-server` 收到的指令，控制与之连接的其他外围设备或IoT设备（例如智能灯泡、传感器等）。
+    *   将捕捉到的原始音频数据安全地发送至 `xiaozhi-microserver` 进行处理。
+    *   接收来自 `xiaozhi-microserver` 合成的语音回复，并通过扬声器播放给用户。
+    *   根据从 `xiaozhi-microserver` 收到的指令，控制与之连接的其他外围设备或IoT设备（例如智能灯泡、传感器等）。
 
-2.  **`xiaozhi-server` (核心AI引擎 - Python实现):**
+2.  **`xiaozhi-microserver` (核心AI引擎 - Python实现):**
     这个基于Python的服务器是整个系统的“大脑”，负责处理所有语音相关的逻辑和AI交互。其关键职责细化如下：
     *   通过WebSocket协议与ESP32设备建立**稳定、低延迟的实时双向通信链路**。
     *   接收来自ESP32的音频流，并利用语音活动检测（VAD）技术精确切分有效的语音片段。
@@ -44,17 +47,17 @@
     *   从 `manager-api` 服务获取其详细的运行时操作配置。
 
 3.  **`manager-api` (管理后端 - Java实现):**
-    这是一个基于Java Spring Boot框架构建的应用程序，它为整个系统的管理和配置提供了一套安全的RESTful API。它不仅是 `manager-web` 控制台的后端支撑，也是 `xiaozhi-server` 的配置数据来源。其核心功能包括：
+    这是一个基于Java Spring Boot框架构建的应用程序，它为整个系统的管理和配置提供了一套安全的RESTful API。它不仅是 `manager-web` 控制台的后端支撑，也是 `xiaozhi-microserver` 的配置数据来源。其核心功能包括：
     *   为Web控制台提供用户认证（登录、权限验证）和用户账户管理功能。
     *   ESP32设备的注册、信息管理以及设备特定配置的维护。
     *   在**MySQL数据库**中持久化存储系统配置，例如用户选择的AI服务提供商、API密钥、设备参数、插件设置等。
-    *   提供特定的API端点，供 `xiaozhi-server` 拉取其所需的最新配置。
+    *   提供特定的API端点，供 `xiaozhi-microserver` 拉取其所需的最新配置。
     *   管理TTS音色选项、处理OTA（Over-The-Air）固件更新流程及相关元数据。
     *   利用 **Redis** 作为高速缓存，存储热点数据（如会话信息、频繁访问的配置），以提升API响应速度和系统整体性能。
 
 4.  **`manager-web` (Web控制面板 - Vue.js实现):**
     这是一个基于Vue.js构建的单页应用（SPA），为系统管理员提供了一个图形化、用户友好的操作界面。其主要能力包括：
-    *   便捷地配置 `xiaozhi-server` 所使用的各项AI服务（如ASR、LLM、TTS的提供商切换、参数调整）。
+    *   便捷地配置 `xiaozhi-microserver` 所使用的各项AI服务（如ASR、LLM、TTS的提供商切换、参数调整）。
     *   管理平台用户账户、角色分配及权限控制。
     *   管理已注册的ESP32设备及其相关设置。
     *   （潜在功能）监控系统运行状态、查看日志、进行故障排查等。
@@ -73,19 +76,19 @@
     *   提供浏览器端的数字人测试页面，用于验证音频播放、接收和交互流程。
     *   集成本地唤醒词运行时，支持基于Sherpa-ONNX的关键词检测。
     *   通过事件桥将页面状态与本地运行时打通，便于调试唤醒词触发与交互效果。
-    *   作为独立模块与`xiaozhi-server`、`manager-web`、`manager-api`并列，便于单独开发和部署。
+    *   作为独立模块与`xiaozhi-microserver`、`manager-web`、`manager-api`并列，便于单独开发和部署。
 
 **高层交互流程概述:**
 
-*   **语音交互主线:** **ESP32设备**捕捉到用户语音后，通过**WebSocket**将音频数据实时传输给**`xiaozhi-server`**。`xiaozhi-server`完成一系列AI处理（VAD、ASR、LLM交互、TTS）后，再通过WebSocket将合成的语音回复发送回ESP32设备进行播放。所有与语音直接相关的实时交互均在此链路完成。
+*   **语音交互主线:** **ESP32设备**捕捉到用户语音后，通过**WebSocket**将音频数据实时传输给**`xiaozhi-microserver`**。`xiaozhi-microserver`完成一系列AI处理（VAD、ASR、LLM交互、TTS）后，再通过WebSocket将合成的语音回复发送回ESP32设备进行播放。所有与语音直接相关的实时交互均在此链路完成。
 *   **管理配置主线:** 管理员通过浏览器访问**`manager-web`**控制台。`manager-web`通过调用**`manager-api`**提供的**RESTful HTTP接口**来执行各种管理操作（如修改配置、管理用户或设备）。数据以JSON格式在两者间传递。
-*   **配置同步:** **`xiaozhi-server`**在启动或特定更新机制触发时，会主动通过HTTP请求从**`manager-api`**拉取其最新的操作配置。这确保了管理员在Web界面上所做的配置更改能够及时有效地应用到核心AI引擎的运行中。
+*   **配置同步:** **`xiaozhi-microserver`**在启动或特定更新机制触发时，会主动通过HTTP请求从**`manager-api`**拉取其最新的操作配置。这确保了管理员在Web界面上所做的配置更改能够及时有效地应用到核心AI引擎的运行中。
 
-这种**前后端分离、核心服务与管理服务分离**的架构设计，使得 `xiaozhi-server`能够专注于高效的实时AI处理任务，而 `manager-api` 和 `manager-web` 则共同提供了一个功能强大且易于使用的管理和配置平台。各组件职责清晰，有利于独立开发、测试、部署和扩展。
+这种**前后端分离、核心服务与管理服务分离**的架构设计，使得 `xiaozhi-microserver`能够专注于高效的实时AI处理任务，而 `manager-api` 和 `manager-web` 则共同提供了一个功能强大且易于使用的管理和配置平台。各组件职责清晰，有利于独立开发、测试、部署和扩展。
 
 ```
 xiaozhi-esp32-server
-  ├─ xiaozhi-server 8000 端口 Python语言开发 负责与esp32通信
+  ├─ xiaozhi-microserver 8000 端口 Python语言开发 负责与esp32通信
   ├─ manager-web 8001 端口 Node.js+Vue开发 负责提供控制台的web界面
   ├─ manager-api 8002 端口 Java语言开发 负责提供控制台的api
   ├─ manager-mobile 跨平台移动应用 uni-app+Vue3开发 负责提供移动版智控台管理
@@ -96,9 +99,9 @@ xiaozhi-esp32-server
 
 ## 3. 核心组件深度剖析
 
-### 3.1. `xiaozhi-server` (核心AI引擎 - Python实现)
+### 3.1. `xiaozhi-microserver` (核心AI引擎 - Python实现)
 
-`xiaozhi-server` 作为系统的智能核心，全权负责处理语音交互、对接各类AI服务以及管理与ESP32设备间的通信。其设计目标是实现高效、灵活且可扩展的语音AI处理能力。
+`xiaozhi-microserver` 作为系统的智能核心，全权负责处理语音交互、对接各类AI服务以及管理与ESP32设备间的通信。其设计目标是实现高效、灵活且可扩展的语音AI处理能力。
 
 *   **核心目标:**
     *   为ESP32设备提供实时的语音指令处理服务。
@@ -109,7 +112,7 @@ xiaozhi-esp32-server
 
 *   **核心技术栈:**
     *   **Python 3:** 作为主要编程语言，Python以其丰富的AI/ML生态库和快速开发特性被选用。
-    *   **Asyncio:** Python的异步编程框架，是`xiaozhi-server`高性能的关键。它被广泛用于高效处理来自大量ESP32设备的并发WebSocket连接，以及执行与外部AI服务API通信时的非阻塞I/O操作，确保服务器在高并发下的响应能力。
+    *   **Asyncio:** Python的异步编程框架，是`xiaozhi-microserver`高性能的关键。它被广泛用于高效处理来自大量ESP32设备的并发WebSocket连接，以及执行与外部AI服务API通信时的非阻塞I/O操作，确保服务器在高并发下的响应能力。
     *   **`websockets` 库:** 提供WebSocket服务器的具体实现，支持与ESP32客户端进行全双工实时通信。
     *   **HTTP客户端 (如 `aiohttp`, `httpx`):** 用于异步执行HTTP请求，主要目的是从`manager-api`获取配置信息，以及与云端AI服务的API进行交互。
     *   **YAML (通常通过 PyYAML 库):** 用于解析本地的 `config.yaml` 配置文件。
@@ -118,7 +121,7 @@ xiaozhi-esp32-server
 *   **关键实现细节:**
 
     1.  **AI服务提供者模式 (Provider Pattern - `core/providers/`):**
-        *   **设计思想:** 这是`xiaozhi-server`集成不同AI服务的核心设计模式，极大地增强了系统的灵活性和可扩展性。针对每一种AI服务类型（ASR, TTS, LLM, VAD, Intent, Memory, VLLM），都在其对应子目录下定义了一个抽象基类 (ABC, Abstract Base Class)，例如 `core/providers/asr/base.py`。这个基类规定了该类型服务必须实现的通用接口方法（如ASR的 `async def transcribe(self, audio_chunk: bytes) -> str: pass`）。
+        *   **设计思想:** 这是`xiaozhi-microserver`集成不同AI服务的核心设计模式，极大地增强了系统的灵活性和可扩展性。针对每一种AI服务类型（ASR, TTS, LLM, VAD, Intent, Memory, VLLM），都在其对应子目录下定义了一个抽象基类 (ABC, Abstract Base Class)，例如 `core/providers/asr/base.py`。这个基类规定了该类型服务必须实现的通用接口方法（如ASR的 `async def transcribe(self, audio_chunk: bytes) -> str: pass`）。
         *   **具体实现:** 各种具体的AI服务提供商或本地模型的实现，则以独立的Python类形式存在（例如 `core/providers/asr/fun_local.py` 实现了本地FunASR的逻辑，`core/providers/llm/openai.py` 实现了与OpenAI GPT模型的对接）。这些具体类继承自相应的抽象基类，并实现其定义的接口。部分提供者还使用DTOs (Data Transfer Objects, 存在于各自的 `dto/` 目录) 来结构化与外部服务交换的数据。
         *   **优势:** 使得核心业务逻辑能够以统一的方式调用不同的AI服务，而无需关心其底层具体实现。用户可以通过配置文件轻松切换AI服务后端。添加对新AI服务的支持也变得相对简单，只需实现对应的Provider接口。
         *   **动态加载与初始化:** `core/utils/modules_initialize.py` 脚本扮演了工厂的角色。它在服务器启动时，或在接收到配置更新指令时，会根据配置文件中 `selected_module` 及各项服务的具体provider设置，动态地导入并实例化相应的Provider类。
@@ -155,7 +158,7 @@ xiaozhi-esp32-server
                 *   **函数名称 (Function Name):** LLM调用时使用的标识符。
                 *   **功能描述 (Description):** 供LLM理解此函数的作用。
                 *   **参数模式 (Parameters Schema):** 通常是一个JSON Schema，详细定义了函数所需的参数、类型、是否必需以及描述。这是LLM能够正确生成函数调用参数的关键。
-        *   **执行流程:** 当LLM在其思考过程中决定需要调用某个外部工具或函数来获取信息或执行操作时，它会依据预先提供的函数模式生成一个结构化的“函数调用”请求。`xiaozhi-server`中的`functionHandler.py`捕获此请求，从插件注册表中找到对应的Python函数并执行，然后将执行结果返回给LLM，LLM再基于此结果生成最终给用户的自然语言回复。
+        *   **执行流程:** 当LLM在其思考过程中决定需要调用某个外部工具或函数来获取信息或执行操作时，它会依据预先提供的函数模式生成一个结构化的“函数调用”请求。`xiaozhi-microserver`中的`functionHandler.py`捕获此请求，从插件注册表中找到对应的Python函数并执行，然后将执行结果返回给LLM，LLM再基于此结果生成最终给用户的自然语言回复。
 
     5.  **配置管理 (`config/`):**
         *   **加载机制:** `config_loader.py` (通过 `settings.py` 被调用) 负责从根目录的 `config.yaml` 文件加载基础配置。
@@ -166,7 +169,7 @@ xiaozhi-esp32-server
     6.  **辅助HTTP服务 (`core/http_server.py`):**
         *   与WebSocket服务并行运行一个简单的HTTP服务器，用于处理特定的HTTP请求。最主要的功能是为ESP32设备提供OTA (Over-The-Air) 固件更新的下载服务 (通过 `/xiaozhi/ota/` 端点)。此外，也可能承载其他如 `/mcp/vision/explain` (视觉分析) 等工具性HTTP接口。
 
-综上所述，`xiaozhi-server` 是一个采用现代Python异步编程模型构建的、高度模块化、配置驱动的AI应用服务器。其精心设计的Provider模式和插件架构赋予了它强大的适应性和扩展性，能够灵活接入不同的AI能力并支持日益增长的功能需求。
+综上所述，`xiaozhi-microserver` 是一个采用现代Python异步编程模型构建的、高度模块化、配置驱动的AI应用服务器。其精心设计的Provider模式和插件架构赋予了它强大的适应性和扩展性，能够灵活接入不同的AI能力并支持日益增长的功能需求。
 
 ---
 
@@ -176,7 +179,7 @@ xiaozhi-esp32-server
 
 *   **核心目标:**
     *   为`manager-web`（Vue.js前端）提供一套安全、稳定、符合RESTful规范的API接口，使得管理员能够便捷地管理用户、设备、系统配置及其他相关资源。
-    *   充当`xiaozhi-server`（Python核心AI引擎）的集中化配置数据提供者，允许`xiaozhi-server`实例在启动或运行时获取其最新的操作参数。
+    *   充当`xiaozhi-microserver`（Python核心AI引擎）的集中化配置数据提供者，允许`xiaozhi-microserver`实例在启动或运行时获取其最新的操作参数。
     *   持久化存储关键数据，例如：用户账户信息、设备注册详情、AI服务提供商配置（包括API密钥、选定的服务模型等）、TTS音色参数，以及OTA固件版本信息等。
 
 *   **核心技术栈:**
@@ -198,7 +201,7 @@ xiaozhi-esp32-server
 *   **关键实现细节:**
 
     1.  **模块化项目结构 (`modules/` 包):**
-        *   `manager-api` 的核心业务逻辑被清晰地划分到 `src/main/java/xiaozhi/modules/` 目录下的不同模块中。这种按功能领域划分模块的方式（例如 `sys` 负责系统管理，`agent` 负责智能体配置，`device` 负责设备管理，`config` 负责为`xiaozhi-server`提供配置，`security` 负责安全，`timbre` 负责音色管理，`ota` 负责固件升级）极大地提高了代码的可维护性和可扩展性。
+        *   `manager-api` 的核心业务逻辑被清晰地划分到 `src/main/java/xiaozhi/modules/` 目录下的不同模块中。这种按功能领域划分模块的方式（例如 `sys` 负责系统管理，`agent` 负责智能体配置，`device` 负责设备管理，`config` 负责为`xiaozhi-microserver`提供配置，`security` 负责安全，`timbre` 负责音色管理，`ota` 负责固件升级）极大地提高了代码的可维护性和可扩展性。
         *   **各模块内部结构:** 每个业务模块通常遵循经典的三层架构或其变体：
             *   **Controller (控制层):** 位于 `xiaozhi.modules.[模块名].controller`。
             *   **Service (服务层):** 位于 `xiaozhi.modules.[模块名].service`。
@@ -248,7 +251,7 @@ xiaozhi-esp32-server
 
 *   **核心目标:**
     *   提供一个基于Web的集中式控制面板，供管理员进行系统操作与监控。
-    *   实现对 `xiaozhi-server` 中AI服务提供商（ASR、LLM、TTS等）及其相关API密钥或许可配置的便捷管理。
+    *   实现对 `xiaozhi-microserver` 中AI服务提供商（ASR、LLM、TTS等）及其相关API密钥或许可配置的便捷管理。
     *   支持用户账户、角色及权限的精细化管理。
     *   提供ESP32设备的注册、配置及状态查看功能。
     *   允许管理员自定义TTS音色、管理OTA固件更新流程、调整系统级参数及字典数据等。
@@ -421,13 +424,13 @@ xiaozhi-esp32-server
 
 `xiaozhi-esp32-server` 系统通过各组件间定义清晰的数据流和交互协议来协同工作。主要的通信方式依赖于针对实时交互优化的WebSocket协议和适用于客户端-服务器请求的RESTful API。
 
-**4.1.核心语音交互流程 (ESP32设备 <-> `xiaozhi-server`)**
+**4.1.核心语音交互流程 (ESP32设备 <-> `xiaozhi-microserver`)**
 
 此流程是实时的，主要通过WebSocket进行低延迟、双向的数据交换。
 
 *   **通讯协议文档:**
     *   详细的通讯协议说明文档可通过以下地址访问: https://ccnphfhqs21z.feishu.cn/wiki/M0XiwldO9iJwHikpXD5cEx71nKh
-    *   该文档详细描述了ESP32设备与`xiaozhi-server`之间的WebSocket通信协议,包括:
+    *   该文档详细描述了ESP32设备与`xiaozhi-microserver`之间的WebSocket通信协议,包括:
         *   连接建立与握手流程
         *   音频数据传输格式
         *   控制命令格式
@@ -435,16 +438,16 @@ xiaozhi-esp32-server
         *   错误处理机制
 
 *   **连接建立与握手:**
-    *   ESP32设备作为客户端，主动向`xiaozhi-server`的指定端点（例如 `ws://<服务器IP>:<WebSocket端口>/xiaozhi/v1/`）发起WebSocket连接请求。
-    *   `xiaozhi-server` (`core/websocket_server.py`) 接收连接，并为每个成功连接的ESP32设备实例化一个独立的`ConnectionHandler`对象来管理该会话的整个生命周期。
+    *   ESP32设备作为客户端，主动向`xiaozhi-microserver`的指定端点（例如 `ws://<服务器IP>:<WebSocket端口>/xiaozhi/v1/`）发起WebSocket连接请求。
+    *   `xiaozhi-microserver` (`core/websocket_server.py`) 接收连接，并为每个成功连接的ESP32设备实例化一个独立的`ConnectionHandler`对象来管理该会话的整个生命周期。
     *   连接建立后，可能会执行一个初始握手流程（由`core/handle/helloHandle.py`处理），用于交换设备标识、认证信息、协议版本或基本状态。
 
-*   **音频上行传输 (ESP32 -> `xiaozhi-server`):**
+*   **音频上行传输 (ESP32 -> `xiaozhi-microserver`):**
     *   用户对ESP32设备讲话后，设备上的麦克风捕捉原始音频数据（通常是PCM或经过压缩如Opus的格式）。
-    *   ESP32将这些音频数据块（chunks）作为WebSocket的**二进制消息 (binary messages)** 实时推送到`xiaozhi-server`对应的`ConnectionHandler`。
+    *   ESP32将这些音频数据块（chunks）作为WebSocket的**二进制消息 (binary messages)** 实时推送到`xiaozhi-microserver`对应的`ConnectionHandler`。
     *   服务器端的`core/handle/receiveAudioHandle.py`模块负责接收、缓冲并处理这些音频数据。
 
-*   **AI核心处理 (在`xiaozhi-server`内部):**
+*   **AI核心处理 (在`xiaozhi-microserver`内部):**
     *   **VAD (语音活动检测):** `receiveAudioHandle.py`利用配置的VAD提供者（如SileroVAD）分析音频流，以准确识别语音的起始和结束点，滤除静默或噪声片段。
     *   **ASR (自动语音识别):** 检测到的有效语音片段被送往配置的ASR提供者（本地如FunASR，或云端服务）。ASR引擎将音频信号转换为文本字符串。
     *   **NLU/LLM (自然语言理解/大型语言模型):** ASR输出的文本，连同从Memory提供者获取的当前对话上下文历史，以及从`plugins_func/`加载的可用函数（工具）的描述模式，一同被传递给配置的LLM提供者。
@@ -453,17 +456,17 @@ xiaozhi-esp32-server
     *   **记忆更新:** 当前轮次的交互（用户问题、LLM回复、可能的功能调用）会被Memory提供者处理，以更新对话历史，供后续交互使用。
     *   **TTS (文本转语音):** LLM生成的最终文本回复被送往配置的TTS提供者，后者将文本合成为语音数据流（例如MP3或WAV格式）。
 
-*   **音频下行响应 (`xiaozhi-server` -> ESP32):**
+*   **音频下行响应 (`xiaozhi-microserver` -> ESP32):**
     *   由TTS提供者合成的语音数据流，通过`core/handle/sendAudioHandle.py`模块，作为WebSocket的**二进制消息**实时发送回ESP32设备。
     *   ESP32设备接收这些音频数据块并立即通过扬声器播放给用户。
 
 *   **控制与状态消息 (双向):**
-    *   除了音频流，ESP32与`xiaozhi-server`之间也通过WebSocket交换**文本消息 (text messages)**，这些消息通常采用JSON格式封装。
+    *   除了音频流，ESP32与`xiaozhi-microserver`之间也通过WebSocket交换**文本消息 (text messages)**，这些消息通常采用JSON格式封装。
     *   **ESP32 -> Server:** 设备可能发送状态报告（如网络状况、麦克风状态）、错误代码、或特定的控制命令（例如用户按键触发的“停止TTS播报”）。
     *   **Server -> ESP32:** 服务器可能发送控制指令给设备（如“开始监听”、“停止监听”、调整灵敏度、下发特定配置参数）。
     *   `core/handle/abortHandle.py`（处理中断请求）、`core/handle/reportHandle.py`（处理设备报告）等模块负责解析和响应这些控制/状态消息。
 
-**4.2.管理与配置流程 (`manager-web` <-> `manager-api` <-> `xiaozhi-server`)**
+**4.2.管理与配置流程 (`manager-web` <-> `manager-api` <-> `xiaozhi-microserver`)**
 
 此流程主要依赖于基于HTTP/HTTPS的RESTful API进行请求-响应式的交互。
 
@@ -476,24 +479,24 @@ xiaozhi-esp32-server
         *   处理完成后，`manager-api`向`manager-web`返回一个JSON格式的HTTP响应。
         *   `manager-web`根据响应结果更新其Vuex状态存储和用户界面显示。
 
-*   **配置同步 (`manager-api` -> `xiaozhi-server`):**
-    *   `xiaozhi-server`的运行依赖于从`manager-api`获取的动态配置（例如当前选用的AI服务提供商及其API密钥）。
-    *   **拉取机制 (Pull Mechanism):** `xiaozhi-server`内部的`config/manage_api_client.py`模块，在服务器启动时或通过特定更新触发器（例如`WebSocketServer.update_config()`被调用），会向`manager-api`的一个指定端点（例如由`modules/config/controller/`中的某个Controller提供）发起HTTP GET请求。
-    *   `manager-api`响应该请求，返回`xiaozhi-server`所需的配置数据（JSON格式）。
-    *   `xiaozhi-server`接收到配置后，会更新其内部状态，并可能重新初始化相关的AI服务模块，以使新配置生效。
+*   **配置同步 (`manager-api` -> `xiaozhi-microserver`):**
+    *   `xiaozhi-microserver`的运行依赖于从`manager-api`获取的动态配置（例如当前选用的AI服务提供商及其API密钥）。
+    *   **拉取机制 (Pull Mechanism):** `xiaozhi-microserver`内部的`config/manage_api_client.py`模块，在服务器启动时或通过特定更新触发器（例如`WebSocketServer.update_config()`被调用），会向`manager-api`的一个指定端点（例如由`modules/config/controller/`中的某个Controller提供）发起HTTP GET请求。
+    *   `manager-api`响应该请求，返回`xiaozhi-microserver`所需的配置数据（JSON格式）。
+    *   `xiaozhi-microserver`接收到配置后，会更新其内部状态，并可能重新初始化相关的AI服务模块，以使新配置生效。
 
 *   **OTA固件更新流程 (概念性描述):**
     *   管理员通过`manager-web`界面上传新的ESP32固件包到`manager-api`的特定端点。
     *   `manager-api`将固件文件存储起来，并记录相关元数据（版本号、适用设备型号等）。
     *   当管理员触发对特定设备的OTA更新时：
-        *   `manager-api`可能会通知`xiaozhi-server`（具体通知机制可能是一个轮询检查点，或`xiaozhi-server`暴露一个接收更新通知的API，或者更松耦合的如消息队列）。
-        *   `xiaozhi-server`随后可以通过WebSocket向目标ESP32设备发送一条包含固件下载URL的指令消息。
-        *   ESP32设备收到指令后，通过HTTP GET请求从该URL下载固件。此URL可能指向`xiaozhi-server`自身运行的`SimpleHttpServer`所服务的路径（如`/xiaozhi/ota/`），或者在某些架构中，也可能直接指向`manager-api`或专用的文件服务器。
+        *   `manager-api`可能会通知`xiaozhi-microserver`（具体通知机制可能是一个轮询检查点，或`xiaozhi-microserver`暴露一个接收更新通知的API，或者更松耦合的如消息队列）。
+        *   `xiaozhi-microserver`随后可以通过WebSocket向目标ESP32设备发送一条包含固件下载URL的指令消息。
+        *   ESP32设备收到指令后，通过HTTP GET请求从该URL下载固件。此URL可能指向`xiaozhi-microserver`自身运行的`SimpleHttpServer`所服务的路径（如`/xiaozhi/ota/`），或者在某些架构中，也可能直接指向`manager-api`或专用的文件服务器。
 
 **4.3. 主要协议总结:**
 
-*   **WebSocket:** 被选用于ESP32与`xiaozhi-server`之间的通信链路，因为它非常适合实时、低延迟、双向的数据流传输（尤其是音频），以及异步控制消息的传递。
-*   **RESTful APIs (基于HTTP/HTTPS，通常使用JSON作为数据交换格式):** 这是Web服务间通信的标准方式。用于`manager-web`（客户端）与`manager-api`（服务器）之间的请求-响应交互，也用于`xiaozhi-server`（作为客户端）从`manager-api`（作为服务器）拉取配置信息。其无状态特性、广泛的库支持和易于理解的语义使其成为此类交互的理想选择。
+*   **WebSocket:** 被选用于ESP32与`xiaozhi-microserver`之间的通信链路，因为它非常适合实时、低延迟、双向的数据流传输（尤其是音频），以及异步控制消息的传递。
+*   **RESTful APIs (基于HTTP/HTTPS，通常使用JSON作为数据交换格式):** 这是Web服务间通信的标准方式。用于`manager-web`（客户端）与`manager-api`（服务器）之间的请求-响应交互，也用于`xiaozhi-microserver`（作为客户端）从`manager-api`（作为服务器）拉取配置信息。其无状态特性、广泛的库支持和易于理解的语义使其成为此类交互的理想选择。
 
 这种多协议并用的通信策略，确保了系统内不同类型的交互需求都能得到高效和恰当的处理，兼顾了实时性和标准化的请求-响应模式。
 
@@ -530,7 +533,7 @@ xiaozhi-esp32-server
 8.  **灵活的部署选项:**
     *   支持通过Docker容器（用于简化的仅服务器或全栈设置）和直接从源代码部署，以适应各种环境和用户专业知识。
 9.  **动态远程配置:**
-    *   `xiaozhi-server`可以从`manager-api`获取其配置，允许实时更新AI提供商和设置，而无需重新启动服务器。
+    *   `xiaozhi-microserver`可以从`manager-api`获取其配置，允许实时更新AI提供商和设置，而无需重新启动服务器。
 10. **开源和社区驱动:**
     *   根据MIT许可证授权，鼓励透明、协作和社区贡献。
 11. **经济高效的解决方案:**
@@ -553,12 +556,12 @@ xiaozhi-esp32-server
 项目可以通过多种方式部署，主要包括使用Docker简化安装过程，或直接从源代码部署以获得更大的控制权和进行开发。
 
 1.  **基于Docker的部署:**
-    *   **简化安装 (仅`xiaozhi-server`):** 此选项仅部署核心的基于Python的`xiaozhi-server`。它适用于主要需要语音AI处理能力和IoT控制，而不需要完整Web管理界面和数据库支持功能（如OTA）的用户。在此模式下，配置通常通过本地文件（`config.yaml`）管理，但如果需要，仍可将其指向一个已存在的`manager-api`实例。
-    *   **全模块安装 (所有组件):** 此方案部署所有核心组件：`xiaozhi-server`、基于Java的`manager-api`、以及基于Vue.js的`manager-web`，同时还包括所需的数据库服务（MySQL和Redis）。这提供了完整的系统体验，包括用于全面配置和管理的Web控制面板。
+    *   **简化安装 (仅`xiaozhi-microserver`):** 此选项仅部署核心的基于Python的`xiaozhi-microserver`。它适用于主要需要语音AI处理能力和IoT控制，而不需要完整Web管理界面和数据库支持功能（如OTA）的用户。在此模式下，配置通常通过本地文件（`config.yaml`）管理，但如果需要，仍可将其指向一个已存在的`manager-api`实例。
+    *   **全模块安装 (所有组件):** 此方案部署所有核心组件：`xiaozhi-microserver`、基于Java的`manager-api`、以及基于Vue.js的`manager-web`，同时还包括所需的数据库服务（MySQL和Redis）。这提供了完整的系统体验，包括用于全面配置和管理的Web控制面板。
     *   项目为每个服务提供了`Dockerfile`定义，并使用`docker-compose.yml`文件（例如`docker-compose.yml`用于基础版，`docker-compose_all.yml`用于全功能版）来编排和管理多容器的部署。此外，还可能提供一个`docker-setup.sh`脚本来辅助自动化部分Docker环境的搭建工作。
 
 2.  **源代码部署:**
-    *   这种方法需要为每个组件手动设置相应的开发环境：Python环境用于`xiaozhi-server`，Java/Maven环境用于`manager-api`，Node.js/Vue CLI环境用于`manager-web`。
+    *   这种方法需要为每个组件手动设置相应的开发环境：Python环境用于`xiaozhi-microserver`，Java/Maven环境用于`manager-api`，Node.js/Vue CLI环境用于`manager-web`。
     *   对于全模块安装，还需要手动安装和配置MySQL及Redis数据库服务。
     *   这种方式通常用于项目开发、深度定制、调试，或者在对环境有特殊要求的生产场景中。
 
@@ -566,12 +569,12 @@ xiaozhi-esp32-server
 
 配置是定制系统行为的关键，尤其是在选择AI服务提供商和管理API密钥方面。
 
-1.  **`xiaozhi-server` 配置:**
-    *   **本地`config.yaml`:** 位于`xiaozhi-server`根目录下的一个主要的YAML格式配置文件。它定义了服务器端口、选定的AI服务提供商（ASR、LLM、TTS、VAD、意图识别、记忆模块等）、它们各自的API密钥或模型路径、插件配置以及日志级别等。
-    *   **通过`manager-api`进行远程配置:** `xiaozhi-server`被设计为可以从`manager-api`获取其运行配置。从`manager-api`获取的设置通常会覆盖本地`config.yaml`中的同名设置。这带来了两大好处：
+1.  **`xiaozhi-microserver` 配置:**
+    *   **本地`config.yaml`:** 位于`xiaozhi-microserver`根目录下的一个主要的YAML格式配置文件。它定义了服务器端口、选定的AI服务提供商（ASR、LLM、TTS、VAD、意图识别、记忆模块等）、它们各自的API密钥或模型路径、插件配置以及日志级别等。
+    *   **通过`manager-api`进行远程配置:** `xiaozhi-microserver`被设计为可以从`manager-api`获取其运行配置。从`manager-api`获取的设置通常会覆盖本地`config.yaml`中的同名设置。这带来了两大好处：
         *   **集中管理:** 所有配置都可以通过`manager-web`界面进行统一管理。
-        *   **动态更新:** `xiaozhi-server`可以刷新其配置并重新初始化AI模块，而无需完全重启服务。
-    *   `xiaozhi-server`中的`config/config_loader.py`和`config/manage_api_client.py`负责处理配置的加载、合并及从`manager-api`拉取的逻辑。
+        *   **动态更新:** `xiaozhi-microserver`可以刷新其配置并重新初始化AI模块，而无需完全重启服务。
+    *   `xiaozhi-microserver`中的`config/config_loader.py`和`config/manage_api_client.py`负责处理配置的加载、合并及从`manager-api`拉取的逻辑。
 
 2.  **`manager-api` 配置:**
     *   作为一个Spring Boot应用，其配置主要通过位于`src/main/resources`目录下的`application.properties`或`application.yml`文件进行管理。
@@ -585,8 +588,8 @@ xiaozhi-esp32-server
     *   项目文档（通常是README）中会推荐一些常见的配置组合，例如：
         *   **“入门全免费设置”:** 该方案旨在利用云AI服务的免费套餐额度或完全免费的本地模型，以最大程度地降低用户的初始使用成本和运营费用。
         *   **“全流式配置”:** 该方案优先考虑系统的响应速度和交互的流畅性，通常会选用支持流式处理的（可能付费的）AI服务。
-    *   这些预定义方案为用户在`xiaozhi-server`中配置AI服务提供商（通过`manager-web`界面或直接修改`config.yaml`）提供了指导。
+    *   这些预定义方案为用户在`xiaozhi-microserver`中配置AI服务提供商（通过`manager-web`界面或直接修改`config.yaml`）提供了指导。
 
-在全模块部署的情况下，推荐使用`manager-web`控制面板作为大多数配置任务的主要操作界面，因为它提供了一种用户友好的方式来管理由`manager-api`持久化并最终由`xiaozhi-server`使用的各项设置。
+在全模块部署的情况下，推荐使用`manager-web`控制面板作为大多数配置任务的主要操作界面，因为它提供了一种用户友好的方式来管理由`manager-api`持久化并最终由`xiaozhi-microserver`使用的各项设置。
 
 ---

@@ -1,5 +1,5 @@
 # 复制本文件为 data/.config.yaml 后填写密钥（data/.config.yaml 已 gitignore）。
-# 对齐单体 xiaozhi-server/config_from_api.yaml。
+# control-admin 私有配置模板（对接 manager-api）。
 #
 # 步骤：
 #   1. 启动 manager-api / manager-web，用管理员打开【参数管理】复制 server.secret

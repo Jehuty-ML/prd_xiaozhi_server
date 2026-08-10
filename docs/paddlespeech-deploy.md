@@ -69,9 +69,9 @@ INFO:     Uvicorn running on http://0.0.0.0:8092 (Press CTRL+C to quit)
 ```
 
 ## 三、修改小智的配置文件
-### 1.```main/xiaozhi-server/core/providers/tts/paddle_speech.py```
+### 1.```main/xiaozhi-microserver/core/providers/tts/paddle_speech.py```
 
-### 2.```main/xiaozhi-server/data/.config.yaml```
+### 2.```main/xiaozhi-microserver/data/.config.yaml```
 使用单模块部署
 ```yaml
 selected_module:

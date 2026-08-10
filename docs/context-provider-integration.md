@@ -83,7 +83,7 @@
 
 ### 方式 2：配置文件配置（单模块部署）
 
-编辑 `xiaozhi-server/data/.config.yaml` 文件，添加 `context_providers` 配置段：
+编辑 `xiaozhi-microserver/xiaozhi-control-admin/data/.config.yaml` 文件，添加 `context_providers` 配置段：
 
 ```yaml
 # 上下文源配置

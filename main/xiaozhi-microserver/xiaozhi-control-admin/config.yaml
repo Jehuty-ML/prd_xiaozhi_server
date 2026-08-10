@@ -1,5 +1,5 @@
 # 模板配置（可提交）。私有密钥请写到 data/.config.yaml，不要改本文件的 secret。
-# 用法对齐单体 xiaozhi-server：
+# 用法：对接 manager-api 时
 #   1. 复制 config_from_api.yaml → data/.config.yaml
 #   2. 填入 manager-api.url / secret，并设 enabled: true
 #   3. 重启 xiaozhi-control-admin
@@ -10,9 +10,9 @@ server:
   name: xiaozhi-microserver
   phase: 2
   environment: development
-  # access WS port（对齐单体 server.port=8000）
+  # access WS port（与历史单体 server.port=8000 对齐）
   port: 8000
-  # control-admin HTTP / OTA / vision（对齐单体 server.http_port=8003）
+  # control-admin HTTP / OTA / vision（与历史单体 server.http_port=8003 对齐）
   http_port: 8003
   websocket: "ws://127.0.0.1:8000/xiaozhi/v1/"
   vision_explain: "http://127.0.0.1:8003/mcp/vision/explain"
