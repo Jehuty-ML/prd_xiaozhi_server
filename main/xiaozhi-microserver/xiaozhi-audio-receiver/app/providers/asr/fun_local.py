@@ -38,7 +38,7 @@ class FunASR(ASRProviderBase):
         super().__init__(config)
         cfg = self.config
         self.model_dir = cfg.get("model_dir") or (
-            "../../xiaozhi-server/models/SenseVoiceSmall"
+            "../models/SenseVoiceSmall"
         )
         self.language = cfg.get("language") or "auto"
 

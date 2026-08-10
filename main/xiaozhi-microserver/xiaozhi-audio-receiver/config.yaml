@@ -23,8 +23,8 @@ ASR:
     output_dir: tmp/
   FunASR:
     type: fun_local
-    # Relative to xiaozhi-server models/ (optional: pip install -r requirements-funasr.txt)
-    model_dir: ../../xiaozhi-server/models/SenseVoiceSmall
+    # Relative to this service dir → ../models/ (optional: pip install -r requirements-funasr.txt)
+    model_dir: ../models/SenseVoiceSmall
     language: auto
     output_dir: tmp/
   # Preferred short name

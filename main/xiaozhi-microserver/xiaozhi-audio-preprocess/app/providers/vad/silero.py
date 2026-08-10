@@ -53,10 +53,8 @@ class SileroVAD(VADProviderBase):
             return Path(str(explicit))
 
         service_root = Path(__file__).resolve().parents[3]
-        # microserver/xiaozhi-audio-preprocess → main/xiaozhi-server
-        monolith_models = (
-            service_root.parents[1] / "xiaozhi-server" / "models"
-        ).resolve()
+        # microserver/xiaozhi-audio-preprocess → microserver/models
+        shared_models = (service_root.parent / "models").resolve()
 
         bases: list[Path] = []
         raw = Path(str(model_dir)) if model_dir else Path()
@@ -64,14 +62,14 @@ class SileroVAD(VADProviderBase):
             bases.append(raw)
         elif model_dir:
             bases.append((service_root / raw).resolve())
-            # manager-api ships monolith paths like "models/snakers4_silero-vad"
+            # manager-api may ship paths like "models/snakers4_silero-vad"
             parts = raw.parts
             if parts and parts[0] == "models":
-                bases.append((monolith_models.joinpath(*parts[1:])).resolve())
+                bases.append((shared_models.joinpath(*parts[1:])).resolve())
             elif raw.name:
-                bases.append((monolith_models / raw.name).resolve())
+                bases.append((shared_models / raw.name).resolve())
         else:
-            bases.append(monolith_models / "snakers4_silero-vad")
+            bases.append(shared_models / "snakers4_silero-vad")
 
         last_candidate = Path()
         for base in bases:

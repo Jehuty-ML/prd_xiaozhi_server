@@ -14,8 +14,8 @@ VAD:
     frame_window_threshold: 3
   SileroVAD:
     type: silero
-    # Relative to xiaozhi-server models/ (or absolute path to onnx)
-    model_dir: ../../xiaozhi-server/models/snakers4_silero-vad
+    # Relative to this service dir → ../models/ (or absolute path to onnx)
+    model_dir: ../models/snakers4_silero-vad
     threshold: 0.5
     threshold_low: 0.2
     min_silence_duration_ms: 200
