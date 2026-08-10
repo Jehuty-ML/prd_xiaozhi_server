@@ -157,6 +157,18 @@ async def startToChat(conn: "ConnectionHandler", text):
             conn.transition_session(SessionEvent.RESET, detail="stt_send_failed")
         raise
 
+    # send_stt await 期间可能已切入广播/play_only；禁止清 abort 并启动 chat（会抢写 sentence_id）
+    if is_play_only_mode(conn) or getattr(conn, "_broadcast_speak_active", False) or getattr(
+        conn, "_broadcast_soft_barge_in", False
+    ):
+        conn.logger.bind(tag=TAG).info(
+            "play_only/广播中拒绝 startToChat（STT await 后复核），不启动 chat"
+        )
+        if conn.session_sm.is_in(SessionState.THINKING):
+            conn.transition_session(SessionEvent.RESET, detail="stt_after_play_only")
+        speak_play_only_denied(conn)
+        return False
+
     # 准备开始新会话
     conn.client_abort = False
 

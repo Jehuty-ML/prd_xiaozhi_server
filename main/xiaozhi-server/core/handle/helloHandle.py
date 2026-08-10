@@ -116,6 +116,14 @@ async def checkWakeupWords(conn: "ConnectionHandler", text):
 
     # 获取音频数据
     opus_packets = await audio_to_data(response.get("file_path"), use_cache=False)
+    # await 期间可能已被广播切到 play_only；禁止再改 sentence_id 顶掉广播会话
+    if is_play_only_mode(conn) or getattr(conn, "_broadcast_speak_active", False):
+        conn.logger.bind(tag=TAG).info(
+            "play_only/广播中拒绝唤醒缓存回复（await 后复核）"
+        )
+        speak_play_only_denied(conn)
+        return True
+
     # 播放唤醒词回复
     conn.client_abort = False
 
