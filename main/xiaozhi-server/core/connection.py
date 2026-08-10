@@ -56,6 +56,7 @@ from core.utils.session_state import (
     detect_timeout_watchdog,
     enter_detect as session_enter_detect,
     resolve_session_mode,
+    should_block_user_dialogue_tts,
     transition_session as session_transition,
 )
 from core.utils.resilience import (
@@ -1393,6 +1394,19 @@ class ConnectionHandler:
         if query is not None:
             self.logger.bind(tag=TAG).info(f"大模型收到用户消息: {query}")
 
+        # startToChat / 工具递归可能在 await 后才真正进入此处；若已切入
+        # play_only/广播，禁止抢写 sentence_id，否则广播帧被过滤且
+        # clearSpeakStatus 因 sid 不匹配拒绝收尾，临时 play_only 永久卡住。
+        if should_block_user_dialogue_tts(self):
+            self.logger.bind(tag=TAG).info(
+                f"play_only/广播中拒绝 chat(depth={depth})，避免抢写 sentence_id"
+            )
+            if depth == 0 and self.session_sm.is_in(SessionState.THINKING):
+                self.transition_session(
+                    SessionEvent.RESET, detail="chat_blocked_play_only"
+                )
+            return None
+
         # 为最顶层时新建会话ID和发送FIRST请求
         if depth == 0:
             current_sentence_id = str(uuid.uuid4().hex)
@@ -1452,6 +1466,25 @@ class ConnectionHandler:
                     self.memory.query_memory(query), self.loop
                 )
                 memory_str = future.result()
+
+            # memory await 窗口内可能已切入广播；若仍持有本轮 sid 则补 LAST 收尾
+            if should_block_user_dialogue_tts(self):
+                self.logger.bind(tag=TAG).info(
+                    "play_only/广播中中止 chat（memory await 后复核）"
+                )
+                if (
+                    depth == 0
+                    and current_sentence_id
+                    and self.sentence_id == current_sentence_id
+                ):
+                    self.tts.tts_text_queue.put(
+                        TTSMessageDTO(
+                            sentence_id=current_sentence_id,
+                            sentence_type=SentenceType.LAST,
+                            content_type=ContentType.ACTION,
+                        )
+                    )
+                return None
 
             # 仅在该说话人首次出现时把身份注入 system，之后靠对话历史首轮保留，
             # 避免每轮在 system 重复出现名字诱导模型反复称呼
@@ -1798,6 +1831,7 @@ class ConnectionHandler:
     def _handle_function_result(self, tool_results, depth, streamed_text=""):
         need_llm_tools = []
         record_tools = []
+        block_tts = should_block_user_dialogue_tts(self)
 
         for result, tool_call_data in tool_results:
             if result.action in [
@@ -1809,6 +1843,10 @@ class ConnectionHandler:
                 if streamed_text and text in streamed_text:
                     self.logger.bind(tag=TAG).debug(
                         f"Skipping duplicate TTS for tool {tool_call_data['name']}, already streamed"
+                    )
+                elif block_tts:
+                    self.logger.bind(tag=TAG).info(
+                        "play_only/广播中跳过工具结果 TTS，避免注入广播句"
                     )
                 else:
                     self.tts.tts_one_sentence(self, ContentType.TEXT, content_detail=text)
@@ -1999,8 +2037,8 @@ class ConnectionHandler:
     async def _detect_timeout_watchdog(self):
         await detect_timeout_watchdog(self)
 
-    def clearSpeakStatus(self):
-        clear_speak_status(self)
+    def clearSpeakStatus(self, end_broadcast: bool = False):
+        clear_speak_status(self, end_broadcast=end_broadcast)
         self.logger.bind(tag=TAG).debug("清除服务端讲话状态")
 
     async def _cancel_tracked_tasks(self):

@@ -12,9 +12,11 @@ from core.utils.dialogue_registry import (
     HEARTBEAT_KEY_PREFIX,
     REGISTRY_HASH_KEY,
     DialogueServerInfo,
+    DialogueServerRegistrar,
     RedisDialogueServerRegistry,
     get_registry_settings,
     resolve_instance_id,
+    resolve_websocket_address,
 )
 
 
@@ -177,6 +179,90 @@ class TestRedisDialogueServerRegistry(unittest.TestCase):
             {"server": {"registry": {"instance_id": "fixed-id"}}}
         )
         self.assertEqual(iid, "fixed-id")
+
+
+class TestDialogueServerRegistrarRefresh(unittest.TestCase):
+    def test_refresh_config_updates_websocket_keeps_instance_id(self):
+        cfg = {
+            "server": {
+                "websocket": "ws://old.example:8000/xiaozhi/v1/",
+                "registry": {"enabled": True, "instance_id": "inst-1"},
+            }
+        }
+        registrar = DialogueServerRegistrar(cfg)
+        self.assertEqual(registrar.instance_id, "inst-1")
+        self.assertEqual(
+            registrar._info.websocket_address,
+            "ws://old.example:8000/xiaozhi/v1/",
+        )
+
+        new_cfg = {
+            "server": {
+                "websocket": "ws://new.example:8000/xiaozhi/v1/",
+                "registry": {"enabled": True, "instance_id": "inst-should-ignore"},
+            }
+        }
+        registrar.refresh_config(new_cfg)
+        self.assertEqual(registrar.instance_id, "inst-1")
+        self.assertEqual(
+            registrar._info.websocket_address,
+            "ws://new.example:8000/xiaozhi/v1/",
+        )
+
+
+class TestResolveWebsocketAddress(unittest.TestCase):
+    def test_single_websocket(self):
+        url = resolve_websocket_address(
+            {"server": {"websocket": "ws://only.example:8000/xiaozhi/v1/"}}
+        )
+        self.assertEqual(url, "ws://only.example:8000/xiaozhi/v1/")
+
+    def test_advertise_overrides_shared_list(self):
+        url = resolve_websocket_address(
+            {
+                "server": {
+                    "websocket": "ws://a:8000/xiaozhi/v1/;ws://b:8000/xiaozhi/v1/",
+                    "registry": {
+                        "advertise_websocket": "ws://b.local:8000/xiaozhi/v1/"
+                    },
+                }
+            }
+        )
+        self.assertEqual(url, "ws://b.local:8000/xiaozhi/v1/")
+
+    def test_semicolon_list_does_not_use_first_entry(self):
+        """分号列表不得把首项注册到每个实例（否则 A 宕机后 B 仍广告 A）。"""
+        url = resolve_websocket_address(
+            {
+                "server": {
+                    "port": 8000,
+                    "websocket": "ws://dead-host:8000/xiaozhi/v1/;ws://alive:8000/xiaozhi/v1/",
+                }
+            }
+        )
+        self.assertNotIn("dead-host", url)
+        self.assertTrue(url.startswith("ws://"))
+        self.assertIn(":8000/xiaozhi/v1/", url)
+
+    def test_env_websocket_url(self):
+        import os
+
+        prev = os.environ.get("XIAOZHI_WEBSOCKET_URL")
+        os.environ["XIAOZHI_WEBSOCKET_URL"] = "ws://from-env:8000/xiaozhi/v1/"
+        try:
+            url = resolve_websocket_address(
+                {
+                    "server": {
+                        "websocket": "ws://a:8000/xiaozhi/v1/;ws://b:8000/xiaozhi/v1/"
+                    }
+                }
+            )
+            self.assertEqual(url, "ws://from-env:8000/xiaozhi/v1/")
+        finally:
+            if prev is None:
+                os.environ.pop("XIAOZHI_WEBSOCKET_URL", None)
+            else:
+                os.environ["XIAOZHI_WEBSOCKET_URL"] = prev
 
 
 if __name__ == "__main__":

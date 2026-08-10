@@ -170,6 +170,15 @@ def is_play_only_mode(conn_or_mode: Any) -> bool:
     )
 
 
+def should_block_user_dialogue_tts(conn: object) -> bool:
+    """play_only 或管理台广播（含软打断窗口）期间禁止用户对话抢写/注入 TTS。"""
+    return (
+        is_play_only_mode(conn)
+        or getattr(conn, "_broadcast_speak_active", False)
+        or getattr(conn, "_broadcast_soft_barge_in", False)
+    )
+
+
 def get_play_only_deny_text(config: Optional[Dict[str, Any]] = None) -> str:
     cfg = config or {}
     block = cfg.get("session_state") if isinstance(cfg.get("session_state"), dict) else {}
@@ -459,16 +468,27 @@ async def detect_timeout_watchdog(conn: object):
                 pass
 
 
-def clear_speak_status(conn: object) -> None:
+def clear_speak_status(conn: object, *, end_broadcast: bool = False) -> None:
     """TTS 结束或打断后清讲话态；已非 SPEAKING 时不触发 TTS_END。
 
-    若处于管理台广播会话，播完/打断后恢复广播前的 mode（默认 common）。
+    若处于管理台广播会话，仅当结束的是广播句本身时才恢复广播前 mode。
+    嵌套 TTS（sentence_id 已变）默认不结束广播；abort 须传 end_broadcast=True，
+    否则 sentence_id 被抢写后会永久卡在临时 play_only。
     """
     sm: SessionStateMachine = conn.session_sm
     if sm.state == SessionState.SPEAKING:
         transition_session(conn, SessionEvent.TTS_END, detail="clear_speak")
     else:
         conn.client_is_speaking = False
+
+    broadcast_sid = getattr(conn, "_broadcast_sentence_id", None)
+    if (
+        not end_broadcast
+        and getattr(conn, "_broadcast_speak_active", False)
+        and broadcast_sid
+        and getattr(conn, "sentence_id", None) != broadcast_sid
+    ):
+        return
     _finish_broadcast_speak(conn, detail="clear_speak")
 
 
@@ -477,6 +497,7 @@ def _finish_broadcast_speak(conn: object, *, detail: str = "") -> None:
     if not getattr(conn, "_broadcast_speak_active", False):
         return
     conn._broadcast_speak_active = False
+    conn._broadcast_sentence_id = None
     restore = (
         getattr(conn, "_broadcast_restore_mode", None) or DEFAULT_SESSION_MODE
     )
@@ -509,8 +530,22 @@ def _finish_broadcast_speak(conn: object, *, detail: str = "") -> None:
 
 
 def speak_play_only_denied(conn: object) -> None:
-    """play_only 下听到唤醒词/试图对话时，播报降级话术。"""
+    """play_only 下听到唤醒词/试图对话时，播报降级话术。
+
+    管理台广播进行中：不另起降级 TTS。新建 sentence_id 会顶掉广播音频，
+    且 stop→clearSpeakStatus 曾误结束临时 play_only；广播本身已在播报即可。
+    """
     if getattr(conn, "stop_event", None) and conn.stop_event.is_set():
+        return
+    if getattr(conn, "_broadcast_speak_active", False) or getattr(
+        conn, "_broadcast_soft_barge_in", False
+    ):
+        logger = getattr(conn, "logger", None)
+        if logger is not None:
+            try:
+                logger.info("广播播报中忽略对话尝试，保持临时 play_only")
+            except Exception:
+                pass
         return
     if not getattr(conn, "tts", None):
         return
@@ -541,6 +576,7 @@ async def apply_session_mode(
 
     mode 未变化时只同步配置、不打断、不 reset。
     mode 变化且设备在线、force_interrupt 时：打断当前对话/播放并 RESET 到 IDLE，再切 mode。
+    广播进行中：只更新结束后的恢复目标，不打断临时 play_only。
     """
     resolved = (mode or "").strip().lower()
     if resolved not in SESSION_MACHINE_PROFILES:
@@ -553,6 +589,15 @@ async def apply_session_mode(
             block = {}
             cfg["session_state"] = block
         block["mode"] = resolved
+
+    # 广播临时 play_only 期间（含重叠广播软打断窗口）：热更新只改恢复目标。
+    # 软打断会短暂清空 _broadcast_speak_active，故同时认 _broadcast_soft_barge_in，
+    # 否则「通知更新配置→play_only」会落空，播完后被还原成 common。
+    if getattr(conn, "_broadcast_speak_active", False) or getattr(
+        conn, "_broadcast_soft_barge_in", False
+    ):
+        conn._broadcast_restore_mode = resolved
+        return True
 
     sm: SessionStateMachine = conn.session_sm
     mode_changed = sm.mode != resolved
@@ -596,6 +641,8 @@ async def speak_broadcast_text(conn: object, text: str) -> bool:
 
     无需事先改全局 session_state.mode（可保持 common）；若原本已是
     play_only，播完仍保持 play_only，不会被误恢复成 common。
+
+    重叠广播：只更新文案并打断当前 TTS，不覆盖已保存的 _broadcast_restore_mode。
     """
     content = (text or "").strip()
     if not content:
@@ -611,10 +658,38 @@ async def speak_broadcast_text(conn: object, text: str) -> bool:
         return False
 
     sm: SessionStateMachine = conn.session_sm
-    conn._broadcast_restore_mode = sm.mode or DEFAULT_SESSION_MODE
+    already_broadcasting = bool(getattr(conn, "_broadcast_speak_active", False))
+    # 仅首次广播快照恢复目标；重叠广播不得把 play_only 写回 restore
+    if not already_broadcasting:
+        conn._broadcast_restore_mode = sm.mode or DEFAULT_SESSION_MODE
     # 先切 mode（内部可能 abort→clearSpeak）；标志要在之后再置，避免被清掉
     try:
-        if sm.mode != PLAY_ONLY_SESSION_MODE:
+        if already_broadcasting:
+            # 软打断：清讲话态但不触发 _finish_broadcast_speak 还原 mode。
+            # 必须标记 soft_barge_in：窗口内 active=False，热更新仍应只改 restore。
+            conn._broadcast_soft_barge_in = True
+            conn._broadcast_speak_active = False
+            try:
+                from core.handle.abortHandle import handleAbortMessage
+
+                await handleAbortMessage(conn)
+            except Exception:
+                conn.client_abort = True
+                if hasattr(conn, "clear_queues"):
+                    try:
+                        conn.clear_queues()
+                    except Exception:
+                        pass
+                sm.transition(SessionEvent.RESET, detail="broadcast_barge_in")
+                if sm.state == SessionState.SPEAKING:
+                    transition_session(
+                        conn, SessionEvent.TTS_END, detail="broadcast_barge_in"
+                    )
+                else:
+                    conn.client_is_speaking = False
+            finally:
+                conn._broadcast_soft_barge_in = False
+        elif sm.mode != PLAY_ONLY_SESSION_MODE:
             ok_mode = await apply_session_mode(
                 conn, PLAY_ONLY_SESSION_MODE, force_interrupt=True
             )
@@ -642,6 +717,7 @@ async def speak_broadcast_text(conn: object, text: str) -> bool:
         conn._broadcast_speak_active = True
         conn.client_abort = False
         conn.sentence_id = uuid.uuid4().hex
+        conn._broadcast_sentence_id = conn.sentence_id
         if not transition_session(
             conn, SessionEvent.TTS_START, detail="broadcast_speak"
         ):
@@ -650,7 +726,7 @@ async def speak_broadcast_text(conn: object, text: str) -> bool:
 
         from core.handle.intentHandler import speak_txt
 
-        speak_txt(conn, content)
+        speak_txt(conn, content, allow_during_broadcast=True)
         return True
     except Exception as e:
         _finish_broadcast_speak(conn, detail="speak_failed")

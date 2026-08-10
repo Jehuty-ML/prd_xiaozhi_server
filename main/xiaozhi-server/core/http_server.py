@@ -24,11 +24,13 @@ class SimpleHttpServer:
         health_state.bind(config=config)
 
     def apply_config(self, config: dict) -> None:
-        """与 WebSocketServer.update_config 对齐：同步 HTTP/OTA/health 侧配置。"""
+        """与 WebSocketServer.update_config 对齐：同步 HTTP/OTA/Vision/health 侧配置。"""
         self.config = config or {}
         self.ota_handler.apply_config(self.config)
-        # VisionHandler 持有 config 引用，需一并替换
-        self.vision_handler.config = self.config
+        if hasattr(self.vision_handler, "apply_config"):
+            self.vision_handler.apply_config(self.config)
+        else:
+            self.vision_handler.config = self.config
         metrics_mod.init_metrics(self.config)
         health_state.bind(config=self.config)
         self.logger.bind(tag=TAG).info(

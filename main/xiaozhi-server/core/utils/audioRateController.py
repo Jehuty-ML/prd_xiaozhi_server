@@ -170,8 +170,18 @@ class AudioRateController:
                     await self.check_queue(send_audio_callback)
             except asyncio.CancelledError:
                 self.logger.bind(tag=TAG).debug("音频发送循环已停止")
+                raise
             except Exception as e:
                 self.logger.bind(tag=TAG).error(f"音频发送循环异常: {e}")
+            finally:
+                # 发送失败/取消时必须唤醒等待排空的协程，否则 TTS stop
+                # 会挂死，clearSpeakStatus 永不执行（广播会永久卡 play_only）
+                try:
+                    self.queue.clear()
+                except Exception:
+                    pass
+                self.queue_empty_event.set()
+                self.queue_has_data_event.clear()
 
         self.pending_send_task = asyncio.create_task(_send_loop())
         return self.pending_send_task
