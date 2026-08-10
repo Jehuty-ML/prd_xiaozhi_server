@@ -7,6 +7,9 @@ from typing import Any, Optional
 from fastapi import WebSocket
 from loguru import logger
 
+from app.ws.session_fsm import device_session_store
+from xiaozhi_common.session import SessionEvent, SessionState
+
 
 class ConnectionManager:
     """In-memory device WebSocket registry.
@@ -45,7 +48,7 @@ class ConnectionManager:
                 self._by_ws.pop(previous, None)
             self._by_client[client_id] = ws
             self._by_ws[ws] = client_id
-            self._states[client_id] = "connected"
+            self._states[client_id] = SessionState.IDLE.value
             meta = self._meta.get(client_id) or {}
             meta.update(
                 {
@@ -59,6 +62,10 @@ class ConnectionManager:
             if alias_id and alias_id != client_id:
                 self._aliases[alias_id] = client_id
                 meta["client_id"] = alias_id
+        device_session_store.ensure(client_id, session_id=session_id or client_id)
+        device_session_store.transition(
+            client_id, SessionEvent.RESET, detail="bind"
+        )
         logger.info(
             f"WS bound client_id={client_id} replaced={previous is not None and previous is not ws} "
             f"active={len(self._by_client)}"
@@ -66,6 +73,7 @@ class ConnectionManager:
         return previous if previous is not None and previous is not ws else None
 
     def unbind(self, ws: WebSocket) -> None:
+        removed_id: Optional[str] = None
         with self._lock:
             client_id = self._by_ws.pop(ws, None)
             if not client_id:
@@ -84,7 +92,10 @@ class ConnectionManager:
             stale_aliases = [a for a, p in self._aliases.items() if p == client_id]
             for a in stale_aliases:
                 self._aliases.pop(a, None)
+            removed_id = client_id
             logger.info(f"WS unbound client_id={client_id}")
+        if removed_id:
+            device_session_store.remove(removed_id)
 
     def resolve_client_id(self, client_or_alias: str) -> Optional[str]:
         with self._lock:
@@ -97,13 +108,32 @@ class ConnectionManager:
 
     def get_state(self, client_id: str) -> str:
         resolved = self.resolve_client_id(client_id) or client_id
+        if resolved in self._by_client or device_session_store.get(resolved):
+            return device_session_store.get_state(resolved)
         return self._states.get(resolved, "unknown")
 
-    def set_state(self, client_id: str, state: str) -> None:
+    def set_state(self, client_id: str, state: str) -> bool:
+        """Legacy setter → FSM transition. Returns False if illegal."""
         resolved = self.resolve_client_id(client_id) or client_id
+        ok, new_state = device_session_store.apply_command(
+            resolved, state, detail="set_state"
+        )
         with self._lock:
-            if resolved in self._by_client:
-                self._states[resolved] = state
+            if resolved in self._by_client or device_session_store.get(resolved):
+                self._states[resolved] = new_state if ok else self._states.get(
+                    resolved, SessionState.IDLE.value
+                )
+        return ok
+
+    def transition(
+        self, client_id: str, event: SessionEvent | str, *, detail: str = ""
+    ) -> bool:
+        resolved = self.resolve_client_id(client_id) or client_id
+        ok = device_session_store.transition(resolved, event, detail=detail)
+        if ok:
+            with self._lock:
+                self._states[resolved] = device_session_store.get_state(resolved)
+        return ok
 
     def set_meta(self, client_id: str, key: str, value: Any) -> None:
         resolved = self.resolve_client_id(client_id) or client_id

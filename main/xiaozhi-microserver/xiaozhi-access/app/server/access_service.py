@@ -15,6 +15,8 @@ from xiaozhi import (
 )
 from app.ws.gateway_runtime import gateway_runtime
 from app.ws.manager import connection_manager
+from app.ws.session_fsm import device_session_store
+from xiaozhi_common.session import SessionEvent, resolve_session_mode
 
 
 class AccessAudioServicer(audio_pb2_grpc.AccessAudioServiceServicer):
@@ -45,9 +47,13 @@ class AccessAudioServicer(audio_pb2_grpc.AccessAudioServiceServicer):
                 client_id, json.dumps(frame, ensure_ascii=False)
             )
             if state in ("start", "sentence_start"):
-                connection_manager.set_state(client_id, "speaking")
+                connection_manager.transition(
+                    client_id, SessionEvent.TTS_START, detail=f"tts_{state}"
+                )
             elif state == "stop":
-                connection_manager.set_state(client_id, "idle")
+                connection_manager.transition(
+                    client_id, SessionEvent.TTS_END, detail="tts_stop"
+                )
             logger.info(
                 f"Access TTS state={state} client_id={client_id} text={text!r}"
             )
@@ -79,22 +85,48 @@ class AccessCommandServicer(command_pb2_grpc.AccessCommandServiceServicer):
     def SendCommand(self, request, context):  # noqa: N802, ANN001
         client_id = request.client_id or getattr(context, "client_id", "")
         command = request.command or ""
-        # Map preprocess listen notifications onto access connection states
-        state_map = {
-            "listen_start": "listening",
-            "listen_stop": "idle",
-            "idle": "idle",
-            "speaking": "speaking",
-            "detect": "detect",
+        # Map preprocess / peer notifications onto validated FSM events
+        fsm_commands = {
+            "listen_start",
+            "listen_stop",
+            "idle",
+            "speaking",
+            "speak_start",
+            "speak_stop",
+            "tts_start",
+            "tts_end",
+            "detect",
+            "chat_start",
+            "think",
+            "voice_end",
+            "abort",
+            "reset",
+            "close_after_chat",
         }
-        mapped = state_map.get(command, command)
-        connection_manager.set_state(client_id, mapped)
-        # State-only: do not push a fake command frame to the device
-        if command in state_map or command == "close_after_chat":
+        if command in fsm_commands or command == "close_after_chat":
             if command == "close_after_chat":
                 connection_manager.set_meta(client_id, "close_after_chat", True)
-            logger.info(f"Access state command client_id={client_id} command={command}")
-            return command_pb2.CommandResponse(code=0, msg="ok", result=command)
+                logger.info(
+                    f"Access state command client_id={client_id} command={command}"
+                )
+                return command_pb2.CommandResponse(code=0, msg="ok", result=command)
+            ok, state = device_session_store.apply_command(
+                client_id, command, detail="SendCommand"
+            )
+            connection_manager.set_meta(client_id, "fsm_state", state)
+            if not ok:
+                logger.warning(
+                    f"Access FSM reject client_id={client_id} command={command} "
+                    f"state={state}"
+                )
+                return command_pb2.CommandResponse(
+                    code=2, msg="illegal_transition", result=state
+                )
+            logger.info(
+                f"Access state command client_id={client_id} command={command} "
+                f"state={state}"
+            )
+            return command_pb2.CommandResponse(code=0, msg="ok", result=state)
         frame = json.dumps(
             {"type": "command", "command": command, "payload": request.payload or ""},
             ensure_ascii=False,
@@ -131,7 +163,9 @@ class AccessSessionServicer(session_pb2_grpc.SessionServiceServicer):
     def Abort(self, request, context):  # noqa: N802, ANN001
         client_id = request.client_id or getattr(context, "client_id", "")
         reason = request.reason or "abort"
-        connection_manager.set_state(client_id, "aborted")
+        connection_manager.transition(
+            client_id, SessionEvent.ABORT, detail=reason
+        )
         meta = connection_manager.get_meta(client_id)
         frame = json.dumps(
             {
@@ -159,7 +193,23 @@ class AccessConfigApplyServicer(admin_pb2_grpc.ConfigApplyServiceServicer):
                 return admin_pb2.ApplyConfigResponse(
                     code=1, msg="invalid config_json", result=""
                 )
+            old_mode = resolve_session_mode(gateway_runtime.config)
             gateway_runtime.apply_config(config, reason=reason)
+            new_mode = resolve_session_mode(config)
+            device_session_store.set_default_mode(new_mode)
+            # Only barge-in online devices when session_state.mode actually changes
+            if new_mode != old_mode:
+                n = device_session_store.apply_mode_to_all(
+                    new_mode, only_if_changed=True
+                )
+                logger.info(
+                    f"session_state.mode {old_mode} -> {new_mode}, "
+                    f"switched={n} reason={reason}"
+                )
+            else:
+                logger.info(
+                    f"session_state.mode unchanged ({new_mode}), skip interrupt"
+                )
             return admin_pb2.ApplyConfigResponse(
                 code=0, msg="ok", result="applied"
             )

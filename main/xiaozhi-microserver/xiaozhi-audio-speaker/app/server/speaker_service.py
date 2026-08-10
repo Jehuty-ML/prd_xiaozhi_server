@@ -10,6 +10,7 @@ from xiaozhi_common.constants import (
     PREPROCESS_SERVICE,
 )
 from xiaozhi_common.grpc.client import GrpcClientPool
+from xiaozhi_common.session import gate_start_play, send_state_command
 
 from app.core.speak_session import session_store
 
@@ -32,6 +33,17 @@ class AudioSpeakerServicer(audio_pb2_grpc.AudioSpeakerServiceServicer):
         logger.info(
             f"SpeakText client={client_id} idx={index} end={end} text={text[:60]!r}"
         )
+        if end:
+            send_state_command(self.pool, client_id, "tts_end", message_id=message_id)
+        else:
+            # micro_service-style: only THINKING/IDLE/SPEAKING may start play
+            if not gate_start_play(self.pool, client_id, message_id=message_id):
+                return audio_pb2.SpeakResponse(
+                    code=2, msg="illegal_state", result="rejected"
+                )
+            send_state_command(
+                self.pool, client_id, "tts_start", message_id=message_id
+            )
         ok = session_store.speak_text(
             client_id,
             text,

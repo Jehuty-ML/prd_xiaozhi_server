@@ -122,6 +122,27 @@ class AgentServicer(audio_pb2_grpc.AgentServiceServicer):
             lock.acquire()
         try:
             session.reset_abort()
+            from xiaozhi_common.session import (
+                gate_start_think,
+                is_play_only_mode,
+            )
+
+            # micro_service-style gate: only LISTEN/IDLE/DETECT may start think
+            if not gate_start_think(self.pool, client_id, message_id=request.message_id):
+                if is_play_only_mode(session.config) or is_play_only_mode(
+                    session.session_sm
+                ):
+                    deny = session.play_only_deny_text()
+                    logger.info(f"Agent SendText play_only deny client={client_id}")
+                    return audio_pb2.TextResponse(code=0, msg="play_only", result=deny)
+                logger.info(f"Agent SendText gate deny client={client_id}")
+                return audio_pb2.TextResponse(
+                    code=2, msg="illegal_state", result=""
+                )
+            if not session.begin_chat():
+                deny = session.play_only_deny_text()
+                logger.info(f"Agent SendText chat_start reject client={client_id}")
+                return audio_pb2.TextResponse(code=0, msg="play_only", result=deny)
             reply = self.engine.chat(session, text)
             logger.info(
                 f"Agent SendText done client_id={client_id} "

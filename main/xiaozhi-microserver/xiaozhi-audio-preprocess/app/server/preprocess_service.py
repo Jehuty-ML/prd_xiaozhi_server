@@ -12,6 +12,7 @@ from xiaozhi_common.constants import (
 )
 from xiaozhi_common.grpc.client import GrpcClientPool
 from xiaozhi_common.resilience import UpstreamError, get_fallback_text
+from xiaozhi_common.session import gate_start_listen
 
 from app.core.audio_codec import OpusDecoderSession
 from app.core.listen_session import session_store
@@ -26,6 +27,12 @@ class AudioPreprocessServicer(audio_pb2_grpc.AudioPreprocessServiceServicer):
     # ---- outbound helpers ----
 
     def _notify_listen(self, client_id: str, message_id: str, command: str) -> None:
+        if command == "listen_start":
+            if not gate_start_listen(self.pool, client_id, message_id=message_id):
+                logger.info(
+                    f"preprocess skip listen_start gate deny client={client_id}"
+                )
+                return
         try:
             stub = command_pb2_grpc.AccessCommandServiceStub(
                 self.pool.channel(ACCESS_SERVICE)

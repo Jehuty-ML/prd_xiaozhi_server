@@ -158,7 +158,7 @@ async def _handle_listen(
     aec_enabled = bool(meta.get("aec_enabled"))
 
     if state == "start":
-        connection_manager.set_state(client_id, "listening")
+        connection_manager.set_state(client_id, "listen_start")
         await _control_listen(
             pool,
             client_id,
@@ -168,7 +168,7 @@ async def _handle_listen(
         )
         return
     if state == "stop":
-        connection_manager.set_state(client_id, "idle")
+        connection_manager.set_state(client_id, "listen_stop")
         await _control_listen(
             pool,
             client_id,
@@ -245,7 +245,7 @@ async def _handle_abort(
     payload: dict[str, Any],
 ) -> None:
     reason = payload.get("reason") or "client_abort"
-    connection_manager.set_state(client_id, "aborted")
+    connection_manager.set_state(client_id, "abort")
     await websocket.send_text(
         json.dumps(
             {

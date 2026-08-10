@@ -11,7 +11,15 @@ from loguru import logger
 from xiaozhi import audio_pb2, audio_pb2_grpc, command_pb2, command_pb2_grpc
 from xiaozhi_common.constants import ACCESS_SERVICE, SPEAKER_SERVICE
 from xiaozhi_common.grpc.client import GrpcClientPool
-from xiaozhi_common.session import SessionState
+from xiaozhi_common.session import (
+    SessionEvent,
+    SessionState,
+    SessionStateMachine,
+    get_play_only_deny_text,
+    is_play_only_mode,
+    resolve_session_mode,
+    send_state_command,
+)
 
 from app.core.dialogue import Dialogue, Message
 
@@ -22,6 +30,8 @@ class Session:
 
     Plugins receive this instead of ConnectionHandler / websocket.
     Outbound TTS goes through speaker; MCP/IoT frames go through access proxy.
+    Access owns the authoritative FSM; this session_sm is a local mirror for
+    plugins / abort flags (transitions still go through access when possible).
     """
 
     client_id: str
@@ -33,7 +43,7 @@ class Session:
     dialogue: Dialogue = field(default_factory=Dialogue)
     sentence_id: str = ""
     intent_type: str = "function_call"
-    state: SessionState = SessionState.IDLE
+    session_sm: Optional[SessionStateMachine] = None
     abort_reason: Optional[str] = None
     client_abort: bool = False
     close_after_chat: bool = False
@@ -53,19 +63,56 @@ class Session:
             self.session_id = uuid.uuid4().hex
         if not self.device_id:
             self.device_id = self.client_id
+        if self.session_sm is None:
+            mode = resolve_session_mode(self.config)
+            self.session_sm = SessionStateMachine(
+                session_id=self.session_id,
+                logger=logger,
+                mode=mode,
+            )
+
+    @property
+    def state(self) -> SessionState:
+        assert self.session_sm is not None
+        return self.session_sm.state
 
     def reset_abort(self) -> None:
         with self._lock:
             self.client_abort = False
             self.abort_reason = None
-            if self.state == SessionState.ABORTED:
-                self.state = SessionState.IDLE
 
     def mark_abort(self, reason: str = "abort") -> None:
         with self._lock:
             self.client_abort = True
             self.abort_reason = reason
-            self.state = SessionState.ABORTED
+            if self.session_sm is not None:
+                self.session_sm.transition(SessionEvent.ABORT, detail=reason)
+        # Best-effort sync to access (authoritative)
+        try:
+            send_state_command(self.pool, self.client_id, "abort", message_id=reason)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def begin_chat(self) -> bool:
+        """CHAT_START on access + local mirror. False if play_only / illegal."""
+        if is_play_only_mode(self.session_sm) or is_play_only_mode(self.config):
+            return False
+        ok = send_state_command(
+            self.pool, self.client_id, "chat_start", message_id=self.sentence_id
+        )
+        if self.session_sm is not None:
+            # Local mirror: still attempt even if access offline (dev)
+            local_ok = self.session_sm.transition(
+                SessionEvent.CHAT_START, detail="begin_chat"
+            )
+            if not ok:
+                # Access rejected (illegal / play_only) — trust remote
+                return False
+            return local_ok or ok
+        return ok
+
+    def play_only_deny_text(self) -> str:
+        return get_play_only_deny_text(self.config)
 
     def change_system_prompt(self, prompt: str) -> None:
         self.prompt = prompt

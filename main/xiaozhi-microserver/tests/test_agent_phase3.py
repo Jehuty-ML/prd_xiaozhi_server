@@ -208,7 +208,9 @@ def test_session_abort(session):
     session_store._sessions[session.client_id] = session
     assert session_store.abort(session.client_id, "unit") is True
     assert session.client_abort is True
-    assert session.state == SessionState.ABORTED
+    # ABORT is an event → IDLE (not a dedicated ABORTED state)
+    assert session.state == SessionState.IDLE
+    assert session.abort_reason == "unit"
 
 
 def test_openai_falls_back_without_key(agent_cfg):
