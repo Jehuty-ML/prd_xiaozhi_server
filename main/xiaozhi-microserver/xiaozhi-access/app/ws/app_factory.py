@@ -165,6 +165,13 @@ async def _handle_websocket(pool: GrpcClientPool, websocket: WebSocket) -> None:
     except Exception as exc:  # noqa: BLE001
         logger.exception(f"WS error client_id={bind_id}: {exc}")
     finally:
+        # Stop peer TTS/LLM/VAD and drop in-memory sessions for this device.
+        try:
+            from app.ws.protocol import _abort_peers
+
+            await _abort_peers(pool, bind_id, reason="disconnect")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"disconnect peer abort skipped: {exc}")
         connection_manager.unbind(websocket)
         if acquired:
             await gateway_runtime.registry.release(session_id)

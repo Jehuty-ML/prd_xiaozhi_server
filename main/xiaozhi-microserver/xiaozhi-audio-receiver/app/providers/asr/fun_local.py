@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import sys
+import threading
 import time
 from typing import Any
 
@@ -63,6 +64,7 @@ class FunASR(ASRProviderBase):
                 disable_update=True,
                 hub="hf",
             )
+        self._infer_lock = threading.Lock()
 
     def recognize(self, pcm: bytes, *, sample_rate: int = 16000) -> str:
         if not pcm:
@@ -71,13 +73,14 @@ class FunASR(ASRProviderBase):
         while retry < MAX_RETRIES:
             try:
                 start = time.time()
-                result = self.model.generate(
-                    input=pcm,
-                    cache={},
-                    language=self.language,
-                    use_itn=True,
-                    batch_size_s=60,
-                )
+                with self._infer_lock:
+                    result = self.model.generate(
+                        input=pcm,
+                        cache={},
+                        language=self.language,
+                        use_itn=True,
+                        batch_size_s=60,
+                    )
                 raw = result[0]["text"] if result else ""
                 text = extract_transcript(lang_tag_filter(raw))
                 logger.debug(

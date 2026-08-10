@@ -68,8 +68,9 @@ _COMMON_TRANSITIONS: Dict[Tuple[SessionState, SessionEvent], SessionState] = {
     (SessionState.THINKING, SessionEvent.CHAT_START): SessionState.THINKING,
     (SessionState.THINKING, SessionEvent.VOICE_END): SessionState.THINKING,
     (SessionState.THINKING, SessionEvent.TTS_END): SessionState.IDLE,
-    # Barge-in while LLM thinking: allow returning to listen
-    (SessionState.THINKING, SessionEvent.LISTEN_START): SessionState.LISTENING,
+    # THINKING + LISTEN_START is intentionally illegal: callers must ABORT
+    # (cancel in-flight LLM/TTS) then LISTEN_START from IDLE. Direct
+    # THINKING→LISTENING leaves agent speaking into a gated-out LISTENING state.
     (SessionState.SPEAKING, SessionEvent.TTS_START): SessionState.SPEAKING,
     (SessionState.SPEAKING, SessionEvent.TTS_END): SessionState.IDLE,
     (SessionState.SPEAKING, SessionEvent.ABORT): SessionState.IDLE,
@@ -406,14 +407,15 @@ class SessionStateMachine:
 
 
 def can_start_listen(state: Optional[SessionState]) -> bool:
-    """预处理开始收音：IDLE / SPEAKING（打断后听）/ DETECT / LISTENING。"""
+    """预处理开始收音：仅 IDLE / DETECT / LISTENING。
+
+    SPEAKING / THINKING 必须先 ABORT（取消对端 LLM/TTS）再听；门禁拒绝后由
+    preprocess abort-then-retry 完成打断，避免 LISTENING 下 SpeakText 被拒并静默丢回复。
+    """
     return state in (
         SessionState.IDLE,
-        SessionState.SPEAKING,
         SessionState.DETECT,
         SessionState.LISTENING,
-        # THINKING: allow notify; access may reject — callers should abort first
-        SessionState.THINKING,
     )
 
 

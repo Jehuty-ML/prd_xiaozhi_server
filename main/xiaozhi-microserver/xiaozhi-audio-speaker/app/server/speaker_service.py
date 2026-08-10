@@ -30,13 +30,21 @@ class AudioSpeakerServicer(audio_pb2_grpc.AudioSpeakerServiceServicer):
         end = bool(request.end)
         index = int(request.index or 0)
         total = int(request.total or 0)
+        has_text = bool(text.strip())
         logger.info(
             f"SpeakText client={client_id} idx={index} end={end} text={text[:60]!r}"
         )
-        if end:
-            send_state_command(self.pool, client_id, "tts_end", message_id=message_id)
+        if end and not has_text:
+            # Pure end-of-turn marker. Do not release FSM while Opus may still
+            # drain: a late downlink stop would otherwise TTS_END the next turn.
+            sess = session_store.get(client_id)
+            if sess is None or not sess.has_active_turn():
+                send_state_command(
+                    self.pool, client_id, "tts_end", message_id=message_id
+                )
         else:
-            # micro_service-style: only THINKING/IDLE/SPEAKING may start play
+            # Speak (including one-shot SpeakText(text, end=True) used by bind
+            # prompt / LLM fallback).
             if not gate_start_play(self.pool, client_id, message_id=message_id):
                 return audio_pb2.SpeakResponse(
                     code=2, msg="illegal_state", result="rejected"
@@ -64,7 +72,10 @@ class AudioSpeakerServicer(audio_pb2_grpc.AudioSpeakerServiceServicer):
     def Abort(self, request, context):  # noqa: N802, ANN001
         client_id = request.client_id or getattr(context, "client_id", "")
         reason = request.reason or "abort"
-        ok = session_store.abort(client_id, reason) if client_id else False
+        if reason in ("disconnect", "unbind", "shutdown"):
+            ok = session_store.discard(client_id, reason) if client_id else False
+        else:
+            ok = session_store.abort(client_id, reason) if client_id else False
         logger.info(f"Speaker Abort client={client_id} reason={reason} ok={ok}")
         return audio_pb2.SpeakerAbortResponse(
             code=0, msg="ok", result="aborted" if ok else "no_session"

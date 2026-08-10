@@ -102,6 +102,11 @@ class SpeakSession:
         )
         logger.info(f"SpeakSession abort client={self.client_id} reason={reason}")
 
+    def shutdown(self) -> None:
+        """Abort and stop the daemon worker thread (disconnect cleanup)."""
+        self.abort("shutdown")
+        self._q.put(None)
+
     def clear_broadcast(self, message_id: str = "") -> None:
         with self._lock:
             if not message_id or self._broadcast_message_id == message_id:
@@ -110,6 +115,13 @@ class SpeakSession:
     def broadcast_active(self) -> bool:
         with self._lock:
             return bool(self._broadcast_message_id)
+
+    def has_active_turn(self) -> bool:
+        """True when audio is draining or jobs are still queued for this client."""
+        with self._lock:
+            if self._turn_started:
+                return True
+        return not self._q.empty()
 
     def _should_abort(self) -> bool:
         return self._abort
@@ -126,6 +138,33 @@ class SpeakSession:
 
     def _handle(self, job: SpeakJob) -> None:
         if self._should_abort() and not job.end:
+            return
+
+        # One-shot SpeakText(text, end=True): synthesize then stop (bind prompt,
+        # LLM fallback). Must not treat as a pure end marker that drops text.
+        if job.end and (job.text or "").strip():
+            self._handle(
+                SpeakJob(
+                    message_id=job.message_id,
+                    text=job.text,
+                    index=job.index,
+                    total=job.total or job.index,
+                    end=False,
+                    emotion=job.emotion,
+                    is_broadcast=job.is_broadcast,
+                )
+            )
+            self._handle(
+                SpeakJob(
+                    message_id=job.message_id,
+                    text="",
+                    index=job.index,
+                    total=job.total or job.index,
+                    end=True,
+                    emotion=job.emotion,
+                    is_broadcast=job.is_broadcast,
+                )
+            )
             return
 
         if job.end:
@@ -247,6 +286,20 @@ class SpeakSessionStore:
             return False
         sess.abort(reason)
         return True
+
+    def discard(self, client_id: str, reason: str = "disconnect") -> bool:
+        """Abort and drop the per-client worker (prevents thread leak on churn)."""
+        with self._lock:
+            sess = self._sessions.pop(client_id, None)
+        if not sess:
+            return False
+        sess.shutdown()
+        logger.info(f"SpeakSession discarded client={client_id} reason={reason}")
+        return True
+
+    def get(self, client_id: str) -> Optional[SpeakSession]:
+        with self._lock:
+            return self._sessions.get(client_id)
 
     def speak_text(
         self,

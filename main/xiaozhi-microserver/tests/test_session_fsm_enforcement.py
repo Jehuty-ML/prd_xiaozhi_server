@@ -191,10 +191,25 @@ def test_peer_gates_match_micro_service_rules():
     assert can_continue_play(SessionState.THINKING) is False
 
     assert can_start_listen(SessionState.IDLE) is True
-    assert can_start_listen(SessionState.THINKING) is True
+    assert can_start_listen(SessionState.THINKING) is False
+    assert can_start_listen(SessionState.SPEAKING) is False
+    assert can_start_listen(SessionState.DETECT) is True
+    assert can_start_listen(SessionState.LISTENING) is True
 
 
-def test_gate_start_think_uses_access_state():
+def test_thinking_listen_start_requires_abort_first():
+    """THINKING→LISTEN_START must be illegal so barge-in aborts LLM first."""
+    from xiaozhi_common.session import SessionEvent, SessionState, SessionStateMachine
+
+    sm = SessionStateMachine(session_id="barge")
+    assert sm.transition(SessionEvent.CHAT_START)
+    assert sm.state == SessionState.THINKING
+    assert not sm.transition(SessionEvent.LISTEN_START)
+    assert sm.state == SessionState.THINKING
+    assert sm.transition(SessionEvent.ABORT)
+    assert sm.state == SessionState.IDLE
+    assert sm.transition(SessionEvent.LISTEN_START)
+    assert sm.state == SessionState.LISTENING
     """gate_start_think allows SPEAKING (barge-in); agent aborts before chat."""
     from xiaozhi import command_pb2
     from xiaozhi_common.session import SessionState, gate_start_think

@@ -58,7 +58,12 @@ class ServiceRuntimeConfig:
                 # Keep url/enabled if present; ignore blank secret from redacted peer push.
                 api.pop("secret", None)
                 remote[key] = api
-        merged = deep_merge(dict(self._local or {}), remote)
+        # Merge onto current runtime (preserves prior admin remotes), not bare file
+        # local — otherwise a device-bind ApplyConfig rebases onto YAML and drops
+        # startup_pull credentials.
+        remote = self._strip_placeholder_secrets(remote)
+        base = dict(self.data or self._local or {})
+        merged = deep_merge(base, remote)
         self.data = mirror_provider_aliases(merged)
         selected = ""
         if self.selected_kind:
@@ -67,6 +72,32 @@ class ServiceRuntimeConfig:
             f"{self.log_label} config applied from admin reason={reason or '-'} "
             f"{self.selected_kind or 'ok'}={selected or '-'}"
         )
+
+    @staticmethod
+    def _strip_placeholder_secrets(remote: dict[str, Any]) -> dict[str, Any]:
+        """Remove empty/placeholder credential fields so they cannot overwrite good keys."""
+        try:
+            from xiaozhi_common.provider_aliases import (
+                SECRET_CREDENTIAL_KEYS,
+                is_placeholder_credential,
+            )
+        except ImportError:  # pragma: no cover
+            return remote
+
+        def _walk(node: Any) -> Any:
+            if not isinstance(node, dict):
+                return node
+            out: dict[str, Any] = {}
+            for key, value in node.items():
+                if key in SECRET_CREDENTIAL_KEYS and is_placeholder_credential(value):
+                    continue
+                if isinstance(value, dict):
+                    out[key] = _walk(value)
+                else:
+                    out[key] = value
+            return out
+
+        return _walk(remote)
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.data.get(key, default)

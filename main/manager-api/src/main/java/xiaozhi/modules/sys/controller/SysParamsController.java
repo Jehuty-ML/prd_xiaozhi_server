@@ -138,23 +138,30 @@ public class SysParamsController {
         if (wsUrls.length == 0) {
             throw new RenException(ErrorCode.WEBSOCKET_URLS_EMPTY);
         }
+        boolean hasNonBlank = false;
         for (String url : wsUrls) {
-            if (StringUtils.isNotBlank(url)) {
-                // 检查是否包含localhost或127.0.0.1
-                if (url.contains("localhost") || url.contains("127.0.0.1")) {
-                    throw new RenException(ErrorCode.WEBSOCKET_URL_LOCALHOST);
-                }
-
-                // 验证WebSocket地址格式
-                if (!WebSocketValidator.validateUrlFormat(url)) {
-                    throw new RenException(ErrorCode.WEBSOCKET_URL_FORMAT_ERROR);
-                }
-
-                // 测试WebSocket连接
-                if (!WebSocketValidator.testConnection(url)) {
-                    throw new RenException(ErrorCode.WEBSOCKET_CONNECTION_FAILED);
-                }
+            if (StringUtils.isBlank(url)) {
+                // Empty slot after ';' can be randomly selected by OTA and brick devices.
+                throw new RenException(ErrorCode.WEBSOCKET_URL_FORMAT_ERROR);
             }
+            hasNonBlank = true;
+            // 检查是否包含localhost或127.0.0.1
+            if (url.contains("localhost") || url.contains("127.0.0.1")) {
+                throw new RenException(ErrorCode.WEBSOCKET_URL_LOCALHOST);
+            }
+
+            // 验证WebSocket地址格式
+            if (!WebSocketValidator.validateUrlFormat(url)) {
+                throw new RenException(ErrorCode.WEBSOCKET_URL_FORMAT_ERROR);
+            }
+
+            // 测试WebSocket连接
+            if (!WebSocketValidator.testConnection(url)) {
+                throw new RenException(ErrorCode.WEBSOCKET_CONNECTION_FAILED);
+            }
+        }
+        if (!hasNonBlank) {
+            throw new RenException(ErrorCode.WEBSOCKET_URLS_EMPTY);
         }
     }
 

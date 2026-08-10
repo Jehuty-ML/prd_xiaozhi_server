@@ -131,11 +131,17 @@ class AgentServicer(audio_pb2_grpc.AgentServiceServicer):
                 send_state_command,
             )
 
-            # Barge-in: previous turn left SPEAKING/THINKING → abort then chat.
+            # Barge-in: abort in-flight TTS/LLM before a new chat turn.
+            # Include DETECT: wake-word path may have left SPEAKING→DETECT without
+            # stopping the speaker; skipping abort causes overlapping audio + FSM clobber.
             state = fetch_device_state(
                 self.pool, client_id, message_id=request.message_id or ""
             )
-            if state in (SessionState.SPEAKING, SessionState.THINKING):
+            if state in (
+                SessionState.SPEAKING,
+                SessionState.THINKING,
+                SessionState.DETECT,
+            ):
                 logger.info(
                     f"Agent SendText barge-in client={client_id} from={state}"
                 )
@@ -219,6 +225,26 @@ class AgentServicer(audio_pb2_grpc.AgentServiceServicer):
         client_id = request.client_id or getattr(context, "client_id", "")
         reason = request.reason or "abort"
         ok = session_store.abort(client_id, reason)
+        # Always stop in-flight TTS; mark_abort alone leaves SpeakSession draining.
+        try:
+            from xiaozhi_common.constants import SPEAKER_SERVICE
+
+            stub = audio_pb2_grpc.AudioSpeakerServiceStub(
+                self.pool.channel(SPEAKER_SERVICE)
+            )
+            stub.Abort(
+                audio_pb2.SpeakerAbortRequest(
+                    message_id=request.message_id or "",
+                    client_id=client_id,
+                    reason=reason,
+                ),
+                metadata=self.pool.metadata(client_id, request.message_id or ""),
+                timeout=5,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"Agent Abort speaker fan-out skipped: {exc}")
+        if reason in ("disconnect", "unbind", "shutdown"):
+            session_store.remove(client_id)
         logger.info(f"Agent Abort client={client_id} reason={reason} ok={ok}")
         return audio_pb2.AgentAbortResponse(
             code=0, msg="ok", result="aborted" if ok else "no_session"
