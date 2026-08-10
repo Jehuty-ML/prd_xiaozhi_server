@@ -119,3 +119,66 @@ def test_speak_session_abort_clears():
     time.sleep(0.2)
     stop_events = [e for e in dl.events if e.get("state") == "stop"]
     assert stop_events
+
+
+def test_broadcast_lease_rejects_foreign_tts():
+    from app.core.speak_session import SpeakJob, SpeakSession
+    from app.providers.tts.echo import EchoTTS
+
+    dl = _FakeDownlink()
+    sess = SpeakSession("c3", EchoTTS({}), dl, frame_duration_ms=1)
+    bcast = "bcast-1"
+    assert sess.enqueue(
+        SpeakJob(
+            message_id=bcast,
+            text="广播内容",
+            index=1,
+            total=1,
+            end=False,
+            is_broadcast=True,
+        )
+    )
+    assert sess.broadcast_active()
+    # Dialogue TTS with a different message_id must not steal the line.
+    assert not sess.enqueue(
+        SpeakJob(message_id="chat-1", text="用户对话", index=1, total=0, end=False)
+    )
+    assert sess.enqueue(
+        SpeakJob(
+            message_id=bcast,
+            text="",
+            index=1,
+            total=1,
+            end=True,
+            is_broadcast=True,
+        )
+    )
+    deadline = time.time() + 5
+    while time.time() < deadline and sess.broadcast_active():
+        time.sleep(0.05)
+    assert not sess.broadcast_active()
+    # After broadcast ends, normal dialogue TTS is allowed again.
+    assert sess.enqueue(
+        SpeakJob(message_id="chat-2", text="恢复对话", index=1, total=0, end=False)
+    )
+
+
+def test_abort_force_clears_broadcast_lease():
+    from app.core.speak_session import SpeakJob, SpeakSession
+    from app.providers.tts.echo import EchoTTS
+
+    dl = _FakeDownlink()
+    sess = SpeakSession("c4", EchoTTS({}), dl, frame_duration_ms=50)
+    assert sess.enqueue(
+        SpeakJob(
+            message_id="bcast-2",
+            text="卡住广播",
+            index=1,
+            total=1,
+            end=False,
+            is_broadcast=True,
+        )
+    )
+    assert sess.broadcast_active()
+    sess.abort("force_end_broadcast")
+    assert not sess.broadcast_active()

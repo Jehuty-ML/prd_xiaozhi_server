@@ -4,7 +4,11 @@ import uuid
 
 from loguru import logger
 from xiaozhi import audio_pb2, audio_pb2_grpc, command_pb2, command_pb2_grpc
-from xiaozhi_common.constants import ACCESS_SERVICE
+from xiaozhi_common.constants import (
+    ACCESS_SERVICE,
+    AGENT_SERVICE,
+    PREPROCESS_SERVICE,
+)
 from xiaozhi_common.grpc.client import GrpcClientPool
 
 from app.core.speak_session import session_store
@@ -28,7 +32,7 @@ class AudioSpeakerServicer(audio_pb2_grpc.AudioSpeakerServiceServicer):
         logger.info(
             f"SpeakText client={client_id} idx={index} end={end} text={text[:60]!r}"
         )
-        session_store.speak_text(
+        ok = session_store.speak_text(
             client_id,
             text,
             message_id=message_id,
@@ -37,6 +41,10 @@ class AudioSpeakerServicer(audio_pb2_grpc.AudioSpeakerServiceServicer):
             end=end,
             emotion=request.emotion or "neutral",
         )
+        if not ok:
+            return audio_pb2.SpeakResponse(
+                code=2, msg="blocked_by_broadcast", result="rejected"
+            )
         return audio_pb2.SpeakResponse(
             code=0, msg="ok", result="ended" if end else "queued"
         )
@@ -63,6 +71,8 @@ class AudioSpeakerServicer(audio_pb2_grpc.AudioSpeakerServiceServicer):
         for client_id in clients:
             if exclude and client_id == exclude:
                 continue
+            # Stop in-flight dialogue / detect before owning the audio line.
+            self._abort_peer_dialogue(client_id, message_id)
             session_store.abort(client_id, "broadcast")
             session_store.speak_text(
                 client_id,
@@ -71,6 +81,7 @@ class AudioSpeakerServicer(audio_pb2_grpc.AudioSpeakerServiceServicer):
                 index=1,
                 total=1,
                 end=False,
+                is_broadcast=True,
             )
             session_store.speak_text(
                 client_id,
@@ -79,6 +90,7 @@ class AudioSpeakerServicer(audio_pb2_grpc.AudioSpeakerServiceServicer):
                 index=1,
                 total=1,
                 end=True,
+                is_broadcast=True,
             )
             spoken += 1
         logger.info(
@@ -87,6 +99,40 @@ class AudioSpeakerServicer(audio_pb2_grpc.AudioSpeakerServiceServicer):
         return audio_pb2.BroadcastSpeakResponse(
             code=0, msg="ok", result="broadcast", spoken=spoken
         )
+
+    def _abort_peer_dialogue(self, client_id: str, message_id: str) -> None:
+        """Abort agent chat and preprocess listen so they cannot steal the line."""
+        reason = "broadcast"
+        try:
+            stub = audio_pb2_grpc.AgentServiceStub(self.pool.channel(AGENT_SERVICE))
+            stub.Abort(
+                audio_pb2.AgentAbortRequest(
+                    message_id=message_id,
+                    client_id=client_id,
+                    reason=reason,
+                ),
+                metadata=self.pool.metadata(message_id=message_id),
+                timeout=3,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"BroadcastSpeak agent abort failed client={client_id}: {exc}")
+        try:
+            stub = audio_pb2_grpc.AudioPreprocessServiceStub(
+                self.pool.channel(PREPROCESS_SERVICE)
+            )
+            stub.Abort(
+                audio_pb2.PreprocessAbortRequest(
+                    message_id=message_id,
+                    client_id=client_id,
+                    reason=reason,
+                ),
+                metadata=self.pool.metadata(message_id=message_id),
+                timeout=3,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                f"BroadcastSpeak preprocess abort failed client={client_id}: {exc}"
+            )
 
     def _list_clients(self, message_id: str) -> list[str]:
         try:

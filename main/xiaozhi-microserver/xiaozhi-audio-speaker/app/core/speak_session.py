@@ -6,7 +6,7 @@ import queue
 import threading
 import uuid
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 from loguru import logger
 
@@ -23,6 +23,7 @@ class SpeakJob:
     total: int
     end: bool
     emotion: str = "neutral"
+    is_broadcast: bool = False
 
 
 class SpeakSession:
@@ -43,14 +44,31 @@ class SpeakSession:
         self._abort = False
         self._turn_started = False
         self._active_message_id = ""
+        # While set, only this message_id may enqueue TTS (broadcast ownership).
+        self._broadcast_message_id = ""
         self._rate = SyncAudioRateController(frame_duration_ms)
         self._worker = threading.Thread(
             target=self._run, name=f"speak-{client_id[:8]}", daemon=True
         )
         self._worker.start()
 
-    def enqueue(self, job: SpeakJob) -> None:
+    def enqueue(self, job: SpeakJob) -> bool:
+        """Enqueue a speak job. Returns False if blocked by an active broadcast."""
         with self._lock:
+            broadcast_id = self._broadcast_message_id
+            if (
+                broadcast_id
+                and job.message_id != broadcast_id
+                and not job.is_broadcast
+            ):
+                logger.info(
+                    f"SpeakSession reject foreign TTS during broadcast "
+                    f"client={self.client_id} active={broadcast_id} "
+                    f"got={job.message_id}"
+                )
+                return False
+            if job.is_broadcast and job.message_id:
+                self._broadcast_message_id = job.message_id
             if self._abort and not job.end:
                 # New speak after abort resets abort latch
                 self._abort = False
@@ -60,11 +78,16 @@ class SpeakSession:
                 self._active_message_id = job.message_id
                 self._rate.reset()
         self._q.put(job)
+        return True
 
     def abort(self, reason: str = "abort") -> None:
         with self._lock:
             self._abort = True
             self._turn_started = False
+            # Starting a new broadcast keeps ownership via subsequent enqueue;
+            # other aborts must clear a stuck broadcast lease.
+            if reason != "broadcast":
+                self._broadcast_message_id = ""
         self._rate.abort()
         # Drain pending text jobs
         while True:
@@ -78,6 +101,15 @@ class SpeakSession:
             message_id=self._active_message_id,
         )
         logger.info(f"SpeakSession abort client={self.client_id} reason={reason}")
+
+    def clear_broadcast(self, message_id: str = "") -> None:
+        with self._lock:
+            if not message_id or self._broadcast_message_id == message_id:
+                self._broadcast_message_id = ""
+
+    def broadcast_active(self) -> bool:
+        with self._lock:
+            return bool(self._broadcast_message_id)
 
     def _should_abort(self) -> bool:
         return self._abort
@@ -107,6 +139,11 @@ class SpeakSession:
                 )
             with self._lock:
                 self._turn_started = False
+                if job.is_broadcast or (
+                    self._broadcast_message_id
+                    and job.message_id == self._broadcast_message_id
+                ):
+                    self._broadcast_message_id = ""
             return
 
         text = (job.text or "").strip()
@@ -221,9 +258,10 @@ class SpeakSessionStore:
         total: int = 0,
         end: bool = False,
         emotion: str = "neutral",
-    ) -> None:
+        is_broadcast: bool = False,
+    ) -> bool:
         sess = self.get_or_create(client_id)
-        sess.enqueue(
+        return sess.enqueue(
             SpeakJob(
                 message_id=message_id or uuid.uuid4().hex,
                 text=text,
@@ -231,6 +269,7 @@ class SpeakSessionStore:
                 total=total,
                 end=end,
                 emotion=emotion,
+                is_broadcast=is_broadcast,
             )
         )
 

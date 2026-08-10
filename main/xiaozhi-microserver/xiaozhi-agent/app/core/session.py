@@ -76,13 +76,15 @@ class Session:
         text = (text or "").strip()
         if not text:
             return
+        if self.client_abort:
+            return
         if index <= 0:
             self._speak_index += 1
             index = self._speak_index
         # total<=0 means non-final; speaker waits for speak_end()
         message_id = self.sentence_id or uuid.uuid4().hex
         stub = audio_pb2_grpc.AudioSpeakerServiceStub(self.pool.channel(SPEAKER_SERVICE))
-        stub.SpeakText(
+        resp = stub.SpeakText(
             audio_pb2.SpeakRequest(
                 message_id=message_id,
                 client_id=self.client_id,
@@ -95,14 +97,23 @@ class Session:
             metadata=self.pool.metadata(self.client_id, message_id),
             timeout=30,
         )
+        if int(getattr(resp, "code", 0) or 0) == 2:
+            # Speaker owns a broadcast lease; stop injecting dialogue TTS.
+            self.mark_abort("blocked_by_broadcast")
+            logger.info(
+                f"Session.speak blocked by broadcast client={self.client_id}"
+            )
+            return
         logger.debug(f"Session.speak client={self.client_id} idx={index} text={text!r}")
 
     def speak_end(self) -> None:
         """Signal end of current speak turn (TTS state=stop after drain)."""
+        if self.client_abort:
+            return
         message_id = self.sentence_id or uuid.uuid4().hex
         index = self._speak_index or 1
         stub = audio_pb2_grpc.AudioSpeakerServiceStub(self.pool.channel(SPEAKER_SERVICE))
-        stub.SpeakText(
+        resp = stub.SpeakText(
             audio_pb2.SpeakRequest(
                 message_id=message_id,
                 client_id=self.client_id,
@@ -115,6 +126,9 @@ class Session:
             metadata=self.pool.metadata(self.client_id, message_id),
             timeout=10,
         )
+        if int(getattr(resp, "code", 0) or 0) == 2:
+            self.mark_abort("blocked_by_broadcast")
+            return
         logger.debug(f"Session.speak_end client={self.client_id} idx={index}")
 
     def send_device_json(self, payload: dict[str, Any]) -> bool:
