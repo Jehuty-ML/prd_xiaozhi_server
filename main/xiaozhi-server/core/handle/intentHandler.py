@@ -11,6 +11,7 @@ from core.handle.helloHandle import checkWakeupWords
 from plugins_func.register import Action, ActionResponse
 from core.handle.sendAudioHandle import send_stt_message
 from core.handle.reportHandle import enqueue_tool_report
+from core.utils.session_state import is_play_only_mode, speak_play_only_denied
 from core.utils.util import remove_punctuation_and_length
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType
 
@@ -44,6 +45,13 @@ async def handle_user_intent(conn: "ConnectionHandler", text):
     intent_result = await analyze_intent_with_llm(conn, text)
     if not intent_result:
         return False
+    # LLM await 期间可能已被热更新/广播切到 play_only；禁止再跑工具与对话播报
+    if is_play_only_mode(conn):
+        conn.logger.bind(tag=TAG).info(
+            "play_only 拒绝意图执行（LLM await 后复核），播报降级话术"
+        )
+        speak_play_only_denied(conn)
+        return True
     # 会话开始时生成sentence_id
     conn.sentence_id = str(uuid.uuid4().hex)
     # 处理各种意图
