@@ -11,7 +11,11 @@ from core.handle.helloHandle import checkWakeupWords
 from plugins_func.register import Action, ActionResponse
 from core.handle.sendAudioHandle import send_stt_message
 from core.handle.reportHandle import enqueue_tool_report
-from core.utils.session_state import is_play_only_mode, speak_play_only_denied
+from core.utils.session_state import (
+    is_play_only_mode,
+    should_block_user_dialogue_tts,
+    speak_play_only_denied,
+)
 from core.utils.util import remove_punctuation_and_length
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType
 
@@ -144,6 +148,12 @@ async def process_intent_result(
                         conn.logger.bind(tag=TAG).error(f"LLM生成回复失败: {e}")
                         response = None
                     if response:
+                        if should_block_user_dialogue_tts(conn):
+                            conn.logger.bind(tag=TAG).info(
+                                "play_only/广播中拒绝意图上下文回复（LLM await 后复核）"
+                            )
+                            speak_play_only_denied(conn)
+                            return
                         speak_txt(conn, response)
 
                 conn.executor.submit(process_context_result)
@@ -206,6 +216,15 @@ async def process_intent_result(
                         action=Action.ERROR, result="工具调用超时，请一会再试下哈", response="工具调用超时，请一会再试下哈"
                     )
 
+                def _speak_after_tool(text):
+                    if should_block_user_dialogue_tts(conn):
+                        conn.logger.bind(tag=TAG).info(
+                            "play_only/广播中拒绝意图工具播报（工具/LLM await 后复核）"
+                        )
+                        speak_play_only_denied(conn)
+                        return
+                    speak_txt(conn, text)
+
                 # 上报工具调用结果
                 if result:
                     enqueue_tool_report(conn, function_name, tool_input, str(result.result) if result.result else None, report_tool_call=False)
@@ -213,7 +232,7 @@ async def process_intent_result(
                     if result.action == Action.RESPONSE:  # 直接回复前端
                         text = result.response
                         if text is not None:
-                            speak_txt(conn, text)
+                            _speak_after_tool(text)
                     elif result.action == Action.REQLLM:  # 调用函数后再请求llm生成回复
                         text = result.result
                         conn.dialogue.put(Message(role="tool", content=text))
@@ -228,14 +247,14 @@ async def process_intent_result(
                             llm_result = text
                         if llm_result is None:
                             llm_result = text
-                        speak_txt(conn, llm_result)
+                        _speak_after_tool(llm_result)
                     elif (
                         result.action == Action.NOTFOUND
                         or result.action == Action.ERROR
                     ):
                         text = result.response if result.response else result.result
                         if text is not None:
-                            speak_txt(conn, text)
+                            _speak_after_tool(text)
                     elif function_name != "play_music":
                         # For backward compatibility with original code
                         # 获取当前最新的文本索引
@@ -243,7 +262,7 @@ async def process_intent_result(
                         if text is None:
                             text = result.result
                         if text is not None:
-                            speak_txt(conn, text)
+                            _speak_after_tool(text)
 
             # 将函数执行放在线程池中
             conn.executor.submit(process_function_call)
@@ -254,7 +273,18 @@ async def process_intent_result(
         return False
 
 
-def speak_txt(conn: "ConnectionHandler", text):
+def speak_txt(conn: "ConnectionHandler", text, *, allow_during_broadcast: bool = False):
+    # 管理台广播进行中：禁止意图/对话路径借用当前 sentence_id 注入 FIRST/LAST，
+    # 否则会污染或提前结束广播句。广播自身传 allow_during_broadcast=True。
+    if not allow_during_broadcast and (
+        getattr(conn, "_broadcast_speak_active", False)
+        or getattr(conn, "_broadcast_soft_barge_in", False)
+    ):
+        conn.logger.bind(tag=TAG).info(
+            "广播播报中忽略 speak_txt，避免注入广播句"
+        )
+        return
+
     # 记录文本到 sentence_id 映射
     conn.tts.store_tts_text(conn.sentence_id, text)
 

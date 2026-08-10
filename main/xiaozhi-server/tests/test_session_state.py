@@ -496,7 +496,7 @@ class SessionConnectionWiringTests(unittest.IsolatedAsyncioTestCase):
 
         spoken = {"text": None}
 
-        def _fake_speak(conn, text):
+        def _fake_speak(conn, text, **_kwargs):
             spoken["text"] = text
 
         import sys
@@ -534,7 +534,7 @@ class SessionConnectionWiringTests(unittest.IsolatedAsyncioTestCase):
 
         spoken = []
 
-        def _fake_speak(conn, text):
+        def _fake_speak(conn, text, **_kwargs):
             spoken.append(text)
 
         import sys
@@ -635,7 +635,7 @@ class SessionConnectionWiringTests(unittest.IsolatedAsyncioTestCase):
 
         spoken = []
 
-        def _fake_speak(conn, text):
+        def _fake_speak(conn, text, **_kwargs):
             spoken.append(text)
 
         import sys
