@@ -1,7 +1,8 @@
-# 生产镜像，仅包含应用代码
+# 生产镜像：xiaozhi-microserver 六服务共用同一镜像，由 compose/CMD 选择入口
 FROM ghcr.io/xinnan-tech/xiaozhi-esp32-server:server-base
 
-COPY main/xiaozhi-server .
+COPY main/xiaozhi-microserver .
 
-# 启动应用
-CMD ["python", "app.py"]
+# 默认启动 access；生产请用 docker-compose 覆盖各服务 command
+WORKDIR /opt/xiaozhi-esp32-server/xiaozhi-access
+CMD ["python", "main.py", "--env=dev", "--disable_nacos", "--grpc_port", "50051", "--http_port", "8000"]

@@ -62,8 +62,8 @@ jobs:
             echo "IS_VERSION=false" >> $GITHUB_ENV
           fi
 
-      # 构建 xiaozhi-server 镜像
-      - name: Build and push xiaozhi-server
+      # 构建 xiaozhi-microserver 共用镜像（六服务同一镜像，compose 选入口）
+      - name: Build and push xiaozhi-microserver
         uses: docker/build-push-action@v6
         with:
           context: .

@@ -1,6 +1,6 @@
 version: 2
 updates:
   - package-ecosystem: pip
-    directory: /main/xiaozhi-server
+    directory: /main/xiaozhi-microserver
     schedule:
       interval: weekly

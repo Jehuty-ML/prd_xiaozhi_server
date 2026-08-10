@@ -5,9 +5,10 @@ on:
     branches:
       - main
     paths:
-      - 'main/xiaozhi-server/requirements.txt'
+      - 'main/xiaozhi-microserver/requirements.txt'
       - 'Dockerfile-server-base'
       - '.github/workflows/build-base-image.yml'
+  workflow_dispatch:
 
 jobs:
   build-base:
@@ -45,5 +46,5 @@ jobs:
 
       - name: Output image info
         run: |
-          echo "✅ Base image built and pushed successfully!"
-          echo "📦 Tag: ghcr.io/${{ github.repository }}:server-base"
+          echo "Base image built and pushed successfully"
+          echo "Tag: ghcr.io/${{ github.repository }}:server-base"

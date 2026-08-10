@@ -1,0 +1,218 @@
+# Docker 全模块：六微服务 + 智控台 + MySQL + Redis + RabbitMQ
+# 用法：
+#   cp .env.example .env   # 必须设置 MYSQL_ROOT_PASSWORD
+#   # 将 model.pt 放到 ./models/SenseVoiceSmall/model.pt（若用本地 FunASR）
+#   docker compose -f docker-compose_all.yml up -d
+#
+# 仅语音六服务见 docker-compose.yml；生产叠加见 docker-compose.prod.yml
+
+x-micro-env: &micro-env
+  TZ: ${TZ:-Asia/Shanghai}
+  XIAOZHI_ENV: ${XIAOZHI_ENV:-production}
+
+x-micro-image: &micro-image
+  image: ghcr.nju.edu.cn/xinnan-tech/xiaozhi-esp32-server:server_latest
+  restart: always
+  networks:
+    - default
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: always
+    networks:
+      - default
+    expose:
+      - 5672
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+
+  xiaozhi-control-admin:
+    <<: *micro-image
+    container_name: xiaozhi-control-admin
+    working_dir: /opt/xiaozhi-esp32-server/xiaozhi-control-admin
+    command: >
+      python main.py --env=dev --disable_nacos --grpc_port 50056 --http_port 8003
+    depends_on:
+      xiaozhi-esp32-server-db:
+        condition: service_healthy
+      xiaozhi-esp32-server-redis:
+        condition: service_healthy
+    ports:
+      - "8003:8003"
+      - "50056:50056"
+    environment:
+      <<: *micro-env
+    volumes:
+      - ./data:/opt/xiaozhi-esp32-server/xiaozhi-control-admin/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/health', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  xiaozhi-audio-receiver:
+    <<: *micro-image
+    working_dir: /opt/xiaozhi-esp32-server/xiaozhi-audio-receiver
+    command: >
+      python main.py --env=dev --disable_nacos --grpc_port 50055
+    ports:
+      - "50055:50055"
+    environment:
+      <<: *micro-env
+    volumes:
+      - ./models:/opt/xiaozhi-esp32-server/models
+
+  xiaozhi-access:
+    <<: *micro-image
+    container_name: xiaozhi-access
+    working_dir: /opt/xiaozhi-esp32-server/xiaozhi-access
+    command: >
+      python main.py --env=dev --disable_nacos --grpc_port 50051 --http_port 8000
+      --peer xiaozhi-audio-preprocess-grpc-service=xiaozhi-audio-preprocess:50054
+    ports:
+      - "8000:8000"
+      - "50051:50051"
+    environment:
+      <<: *micro-env
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  xiaozhi-audio-speaker:
+    <<: *micro-image
+    working_dir: /opt/xiaozhi-esp32-server/xiaozhi-audio-speaker
+    command: >
+      python main.py --env=dev --disable_nacos --grpc_port 50053
+      --peer xiaozhi-access-grpc-service=xiaozhi-access:50051
+    ports:
+      - "50053:50053"
+    environment:
+      <<: *micro-env
+    depends_on:
+      - xiaozhi-access
+
+  xiaozhi-agent:
+    <<: *micro-image
+    working_dir: /opt/xiaozhi-esp32-server/xiaozhi-agent
+    command: >
+      python main.py --env=dev --disable_nacos --grpc_port 50052
+      --peer xiaozhi-audio-speaker-grpc-service=xiaozhi-audio-speaker:50053
+    ports:
+      - "50052:50052"
+    environment:
+      <<: *micro-env
+    depends_on:
+      - xiaozhi-audio-speaker
+      - rabbitmq
+
+  xiaozhi-audio-preprocess:
+    <<: *micro-image
+    working_dir: /opt/xiaozhi-esp32-server/xiaozhi-audio-preprocess
+    command: >
+      python main.py --env=dev --disable_nacos --grpc_port 50054
+      --peer xiaozhi-audio-receiver-grpc-service=xiaozhi-audio-receiver:50055
+      --peer xiaozhi-agent-grpc-service=xiaozhi-agent:50052
+      --peer xiaozhi-access-grpc-service=xiaozhi-access:50051
+    ports:
+      - "50054:50054"
+    environment:
+      <<: *micro-env
+    volumes:
+      - ./models:/opt/xiaozhi-esp32-server/models
+    depends_on:
+      - xiaozhi-audio-receiver
+      - xiaozhi-agent
+      - xiaozhi-access
+
+  xiaozhi-esp32-server-web:
+    image: ghcr.nju.edu.cn/xinnan-tech/xiaozhi-esp32-server:web_latest
+    container_name: xiaozhi-esp32-server-web
+    restart: always
+    networks:
+      - default
+    depends_on:
+      xiaozhi-esp32-server-db:
+        condition: service_healthy
+      xiaozhi-esp32-server-redis:
+        condition: service_healthy
+    ports:
+      - "8002:8002"
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - SPRING_DATASOURCE_DRUID_URL=jdbc:mysql://xiaozhi-esp32-server-db:3306/xiaozhi_esp32_server?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true&connectTimeout=30000&socketTimeout=30000&autoReconnect=true&failOverReadOnly=false&maxReconnects=10
+      - SPRING_DATASOURCE_DRUID_USERNAME=root
+      - SPRING_DATASOURCE_DRUID_PASSWORD=${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+      - SPRING_DATA_REDIS_HOST=xiaozhi-esp32-server-redis
+      - SPRING_DATA_REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - SPRING_DATA_REDIS_PORT=6379
+    volumes:
+      - ./uploadfile:/uploadfile
+
+  xiaozhi-esp32-server-db:
+    image: mysql:8.4
+    container_name: xiaozhi-esp32-server-db
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 45s
+      interval: 10s
+      retries: 10
+      start_period: 30s
+    restart: always
+    networks:
+      - default
+    expose:
+      - 3306
+    volumes:
+      - ./mysql/data:/var/lib/mysql
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+      - MYSQL_DATABASE=xiaozhi_esp32_server
+      - MYSQL_INITDB_ARGS=--character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+
+  xiaozhi-esp32-server-redis:
+    image: redis:8.0
+    expose:
+      - 6379
+    container_name: xiaozhi-esp32-server-redis
+    restart: always
+    command: >
+      sh -c 'if [ -n "$$REDIS_PASSWORD" ]; then
+        redis-server --requirepass "$$REDIS_PASSWORD";
+      else
+        redis-server;
+      fi'
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'if [ -n "$$REDIS_PASSWORD" ]; then redis-cli -a "$$REDIS_PASSWORD" ping | grep PONG; else redis-cli ping | grep PONG; fi',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - default
+
+networks:
+  default:
