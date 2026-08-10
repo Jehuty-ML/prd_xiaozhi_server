@@ -676,6 +676,32 @@ class SessionConnectionWiringTests(unittest.IsolatedAsyncioTestCase):
             else:
                 sys.modules["core.handle.intentHandler"] = prev
 
+    async def test_abort_forces_broadcast_finish_after_sentence_id_hijack(self):
+        """sentence_id 被嵌套 TTS 改写后，abort 仍须能结束临时 play_only。"""
+        self.conn.websocket = object()
+        self.conn._closed = False
+        self.conn.clear_queues = lambda: None
+        self.conn.config = {"session_state": {"mode": "common"}}
+        self.conn.session_sm.switch_mode(PLAY_ONLY_SESSION_MODE, reset_to_idle=True)
+        self.conn._broadcast_restore_mode = DEFAULT_SESSION_MODE
+        self.conn._broadcast_speak_active = True
+        self.conn._broadcast_sentence_id = "bcast"
+        self.conn.sentence_id = "bcast"
+        self.assertTrue(
+            transition_session(
+                self.conn, SessionEvent.TTS_START, detail="broadcast_speak"
+            )
+        )
+        # 模拟唤醒缓存等路径抢写 sentence_id
+        self.conn.sentence_id = "nested-wakeup"
+        clear_speak_status(self.conn)
+        self.assertTrue(self.conn._broadcast_speak_active)
+        self.assertEqual(self.conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
+
+        clear_speak_status(self.conn, end_broadcast=True)
+        self.assertFalse(self.conn._broadcast_speak_active)
+        self.assertEqual(self.conn.session_sm.mode, DEFAULT_SESSION_MODE)
+
     async def test_soft_barge_in_window_hot_reload_updates_restore(self):
         """重叠广播软打断窗口内热更新 play_only，结束后不得还原 common。"""
         self.conn.websocket = object()

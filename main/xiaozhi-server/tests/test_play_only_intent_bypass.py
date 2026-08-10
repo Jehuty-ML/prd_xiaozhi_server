@@ -36,6 +36,20 @@ def _stub_module(name: str, **attrs):
     return mod
 
 
+def _drop_pkg_attr(modname: str, attr: str):
+    """避免 `from core.handle import X` 命中包上的旧属性缓存。"""
+    parent, _, child = modname.rpartition(".")
+    if not parent:
+        return
+    pkg = sys.modules.get(parent)
+    if pkg is not None and hasattr(pkg, attr):
+        try:
+            delattr(pkg, attr)
+        except Exception:
+            pass
+    sys.modules.pop(modname, None)
+
+
 class TestPlayOnlyIntentBypass(unittest.IsolatedAsyncioTestCase):
     async def test_start_to_chat_rechecks_play_only_before_intent_early_return(self):
         """intent_handled=True 时仍须被 play_only 拦住，且不得 submit chat。"""
@@ -62,7 +76,7 @@ class TestPlayOnlyIntentBypass(unittest.IsolatedAsyncioTestCase):
             send_stt_message=AsyncMock(),
             SentenceType=SimpleNamespace(FIRST="FIRST", LAST="LAST", MIDDLE="MIDDLE"),
         )
-        sys.modules.pop("core.handle.receiveAudioHandle", None)
+        _drop_pkg_attr("core.handle.receiveAudioHandle", "receiveAudioHandle")
 
         try:
             from core.handle import receiveAudioHandle
@@ -108,7 +122,89 @@ class TestPlayOnlyIntentBypass(unittest.IsolatedAsyncioTestCase):
             conn.executor.submit.assert_not_called()
             self.assertEqual(conn.session_sm.mode, PLAY_ONLY_SESSION_MODE)
         finally:
-            sys.modules.pop("core.handle.receiveAudioHandle", None)
+            _drop_pkg_attr("core.handle.receiveAudioHandle", "receiveAudioHandle")
+            for name, old in prev_mods.items():
+                if old is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = old
+
+    async def test_start_to_chat_rechecks_after_stt_await(self):
+        """STT await 后若已切入广播/play_only，不得清 abort 或 submit chat。"""
+        _ensure_opuslib_stub()
+
+        async def _no_intent(_conn, _text):
+            return False
+
+        async def _stt_then_broadcast(conn, _text):
+            conn._broadcast_speak_active = True
+            await apply_session_mode(conn, PLAY_ONLY_SESSION_MODE, force_interrupt=False)
+
+        prev_mods = {
+            name: sys.modules.get(name)
+            for name in (
+                "core.handle.intentHandler",
+                "core.handle.sendAudioHandle",
+            )
+        }
+        _stub_module(
+            "core.handle.intentHandler",
+            handle_user_intent=_no_intent,
+            speak_txt=lambda *_a, **_k: None,
+        )
+        _stub_module(
+            "core.handle.sendAudioHandle",
+            send_stt_message=_stt_then_broadcast,
+            SentenceType=SimpleNamespace(FIRST="FIRST", LAST="LAST", MIDDLE="MIDDLE"),
+        )
+        _drop_pkg_attr("core.handle.receiveAudioHandle", "receiveAudioHandle")
+        try:
+            from core.handle import receiveAudioHandle
+
+            sm = SessionStateMachine(session_id="t1b", mode="common")
+            denied = {"n": 0}
+
+            class _Conn:
+                def __init__(self):
+                    self.session_sm = sm
+                    self.config = {"session_state": {"mode": "common"}}
+                    self.logger = MagicMock()
+                    self.logger.bind.return_value = self.logger
+                    self.need_bind = False
+                    self.max_output_size = 0
+                    self.client_is_speaking = False
+                    self.client_listen_mode = "auto"
+                    self.introduced_speakers = set()
+                    self.current_speaker = None
+                    self.headers = {}
+                    self.executor = MagicMock()
+                    self.tts = MagicMock()
+                    self.stop_event = None
+                    self.client_abort = True
+                    self.sentence_id = "pre"
+                    self._broadcast_speak_active = False
+
+                def transition_session(self, event, detail="", force=False):
+                    return transition_session(self, event, detail=detail, force=force)
+
+            conn = _Conn()
+            with patch.object(
+                receiveAudioHandle,
+                "speak_play_only_denied",
+                side_effect=lambda c: denied.__setitem__("n", denied["n"] + 1),
+            ), patch(
+                "core.utils.resilience.check_system_overload", return_value=None
+            ):
+                ok = await receiveAudioHandle.startToChat(conn, "你好")
+
+            self.assertFalse(ok)
+            self.assertTrue(conn.client_abort)
+            self.assertEqual(conn.sentence_id, "pre")
+            conn.executor.submit.assert_not_called()
+            self.assertEqual(denied["n"], 1)
+            self.assertEqual(conn.session_sm.state, SessionState.IDLE)
+        finally:
+            _drop_pkg_attr("core.handle.receiveAudioHandle", "receiveAudioHandle")
             for name, old in prev_mods.items():
                 if old is None:
                     sys.modules.pop(name, None)
