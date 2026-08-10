@@ -108,6 +108,14 @@ async def process_intent_result(
 
             if function_name == "result_for_context":
                 await send_stt_message(conn, original_text)
+                if is_play_only_mode(conn) or getattr(
+                    conn, "_broadcast_speak_active", False
+                ) or getattr(conn, "_broadcast_soft_barge_in", False):
+                    conn.logger.bind(tag=TAG).info(
+                        "play_only/广播中拒绝意图上下文回复（STT await 后复核）"
+                    )
+                    speak_play_only_denied(conn)
+                    return True
                 conn.client_abort = False
 
                 def process_context_result():
@@ -157,6 +165,14 @@ async def process_intent_result(
             }
 
             await send_stt_message(conn, original_text)
+            if is_play_only_mode(conn) or getattr(
+                conn, "_broadcast_speak_active", False
+            ) or getattr(conn, "_broadcast_soft_barge_in", False):
+                conn.logger.bind(tag=TAG).info(
+                    "play_only/广播中拒绝意图工具执行（STT await 后复核）"
+                )
+                speak_play_only_denied(conn)
+                return True
             conn.client_abort = False
 
             # 准备工具调用参数

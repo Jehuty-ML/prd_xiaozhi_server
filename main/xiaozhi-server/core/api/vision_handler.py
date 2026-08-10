@@ -7,6 +7,7 @@ from core.utils.util import get_vision_url, is_valid_image_file
 from core.utils.vllm import create_instance
 from config.config_loader import get_private_config_from_api
 from core.utils.auth import AuthToken
+from core.utils.runtime_env import is_development
 import base64
 from typing import Tuple, Optional
 from plugins_func.register import Action
@@ -23,6 +24,14 @@ class VisionHandler(BaseHandler):
         # 初始化认证工具（生产环境使用规范化盐值）
         self.auth = AuthToken.from_config(config)
 
+    def apply_config(self, config: dict) -> None:
+        """热更新：同步 config 并重建 AuthToken（盐值随 env/auth_key 变化）。"""
+        self.config = config or {}
+        self.auth = AuthToken.from_config(self.config)
+        self.logger.bind(tag=TAG).info(
+            "Vision 认证配置已热更新同步"
+        )
+
     def _create_error_response(self, message: str) -> dict:
         """创建统一的错误响应格式"""
         return {"success": False, "message": message}
@@ -33,10 +42,14 @@ class VisionHandler(BaseHandler):
         auth_header = request.headers.get("Authorization", "")
         client_id = request.headers.get("Client-Id", "")
 
-        # 允许测试客户端跳过认证
+        # 仅 development 允许测试客户端跳过认证；生产环境一律校验 JWT
         if client_id == "web_test_client":
-            device_id = request.headers.get("Device-Id", "test_device")
-            return True, device_id
+            if is_development(self.config):
+                device_id = request.headers.get("Device-Id", "test_device")
+                return True, device_id
+            self.logger.bind(tag=TAG).warning(
+                "生产环境拒绝 web_test_client 跳过 Vision 认证"
+            )
 
         if not auth_header.startswith("Bearer "):
             return False, None
