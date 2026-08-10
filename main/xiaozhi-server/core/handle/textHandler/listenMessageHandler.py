@@ -100,9 +100,6 @@ class ListenTextMessageHandler(TextMessageHandler):
                     # 标记为来电接听模式
                     conn.incoming_call = True
 
-                    # 准备开始新会话
-                    conn.sentence_id = uuid.uuid4().hex
-
                     await send_stt_message(conn, call_text)
 
                     # 等待tts初始化，最多等待3秒
@@ -111,6 +108,19 @@ class ListenTextMessageHandler(TextMessageHandler):
                         if conn.tts:
                             break
                         await asyncio.sleep(0.1)
+
+                    # await 期间可能已切入广播/play_only；禁止抢写 sentence_id / 入队 TTS
+                    if is_play_only_mode(conn) or getattr(
+                        conn, "_broadcast_speak_active", False
+                    ) or getattr(conn, "_broadcast_soft_barge_in", False):
+                        conn.logger.bind(tag=TAG).info(
+                            "play_only/广播中拒绝 device_call（await 后复核）"
+                        )
+                        speak_play_only_denied(conn)
+                        return
+
+                    # 准备开始新会话（复核通过后再分配，避免顶掉广播句）
+                    conn.sentence_id = uuid.uuid4().hex
 
                     if conn.tts:
                         conn.tts.store_tts_text(conn.sentence_id, call_text)
@@ -131,7 +141,25 @@ class ListenTextMessageHandler(TextMessageHandler):
                     # 唤醒但不回复：进入 DETECT 等待指令，协议上仍打一下 stt/stop
                     conn.enter_detect(detail="wakeup_no_greeting")
                     await send_stt_message(conn, original_text)
+                    # await 后若已广播：不得再走 stop/clear（sentence_id 可能已是广播句）
+                    if is_play_only_mode(conn) or getattr(
+                        conn, "_broadcast_speak_active", False
+                    ) or getattr(conn, "_broadcast_soft_barge_in", False):
+                        conn.logger.bind(tag=TAG).info(
+                            "play_only/广播中拒绝 wakeup_no_greeting（STT await 后复核）"
+                        )
+                        speak_play_only_denied(conn)
+                        return
                     await send_tts_message(conn, "stop", None)
+                    # stop 等待期间广播可能抢写 sentence_id；禁止再用当前 sid clear 结束广播
+                    if is_play_only_mode(conn) or getattr(
+                        conn, "_broadcast_speak_active", False
+                    ) or getattr(conn, "_broadcast_soft_barge_in", False):
+                        conn.logger.bind(tag=TAG).info(
+                            "play_only/广播中拒绝 wakeup_no_greeting（stop await 后复核）"
+                        )
+                        speak_play_only_denied(conn)
+                        return
                     conn.clearSpeakStatus()
                     # 播控结束后回到 DETECT，武装空窗超时
                     conn.enter_detect(detail="await_command")
