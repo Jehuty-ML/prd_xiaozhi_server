@@ -135,6 +135,33 @@ class SpeakSession:
         if self._should_abort() and not job.end:
             return
 
+        # One-shot SpeakText(text, end=True): synthesize then stop (bind prompt,
+        # LLM fallback). Must not treat as a pure end marker that drops text.
+        if job.end and (job.text or "").strip():
+            self._handle(
+                SpeakJob(
+                    message_id=job.message_id,
+                    text=job.text,
+                    index=job.index,
+                    total=job.total or job.index,
+                    end=False,
+                    emotion=job.emotion,
+                    is_broadcast=job.is_broadcast,
+                )
+            )
+            self._handle(
+                SpeakJob(
+                    message_id=job.message_id,
+                    text="",
+                    index=job.index,
+                    total=job.total or job.index,
+                    end=True,
+                    emotion=job.emotion,
+                    is_broadcast=job.is_broadcast,
+                )
+            )
+            return
+
         if job.end:
             if self._turn_started and not self._should_abort():
                 self.downlink.send_state(

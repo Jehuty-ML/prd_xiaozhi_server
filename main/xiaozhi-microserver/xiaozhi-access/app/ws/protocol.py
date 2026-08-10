@@ -366,7 +366,9 @@ async def _handle_server(
     if action == "broadcast_speak":
         secret = str(content.get("secret") or "")
         expected = gateway_runtime.manager_secret()
-        if expected and secret != expected:
+        # Fail closed like update_config: empty expected secret must not allow
+        # unauthenticated fleet-wide TTS interrupt.
+        if not expected or secret != expected:
             await websocket.send_text(
                 json.dumps(
                     {

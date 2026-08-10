@@ -102,6 +102,36 @@ def test_speak_session_start_sentence_stop():
     assert any(e.get("audio") for e in dl.events)
 
 
+def test_speak_session_oneshot_text_with_end_plays():
+    """SpeakText(text, end=True) must synthesize — bind prompt / LLM fallback."""
+    from app.core.speak_session import SpeakJob, SpeakSession
+    from app.providers.tts.echo import EchoTTS
+
+    dl = _FakeDownlink()
+    sess = SpeakSession("c-oneshot", EchoTTS({}), dl, frame_duration_ms=1)
+    mid = "bind1"
+    sess.enqueue(
+        SpeakJob(
+            message_id=mid,
+            text="请登录控制面板，输入123456，绑定设备。",
+            index=1,
+            total=1,
+            end=True,
+        )
+    )
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        states = [e.get("state") for e in dl.events if e.get("state")]
+        if "start" in states and "sentence_start" in states and "stop" in states:
+            break
+        time.sleep(0.05)
+    states = [e.get("state") for e in dl.events if e.get("state")]
+    assert "start" in states
+    assert "sentence_start" in states
+    assert "stop" in states
+    assert any(e.get("audio") for e in dl.events)
+
+
 def test_speak_session_abort_clears():
     from app.core.speak_session import SpeakJob, SpeakSession
     from app.providers.tts.echo import EchoTTS
