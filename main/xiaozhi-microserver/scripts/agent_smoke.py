@@ -1,4 +1,4 @@
-"""Phase-3 smoke: EchoLLM chat, get_time tool, exit intent, MCP/IoT proxy."""
+﻿"""Phase-3 smoke: EchoLLM chat, get_time tool, exit intent, MCP/IoT proxy."""
 
 from __future__ import annotations
 
@@ -168,7 +168,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--url",
-        default="ws://127.0.0.1:8103/xiaozhi/v1/?device-id=smoke-agent",
+        default="ws://127.0.0.1:8000/xiaozhi/v1/?device-id=smoke-agent",
     )
     parser.add_argument("--text", default="现在几点了")
     parser.add_argument("--timeout", type=float, default=20.0)

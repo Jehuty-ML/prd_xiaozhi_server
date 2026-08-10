@@ -198,3 +198,8 @@ uploadfile
 main/digital-human/wakeword_runtime/models
 main/digital-human/wakeword_runtime/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01
 sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2
+
+# local plan copies ¡ª do not commit
+docs/*.plan.md
+**/xiaozhi_microserver_split.plan.md
+

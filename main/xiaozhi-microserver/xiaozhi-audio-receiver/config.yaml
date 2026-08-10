@@ -36,7 +36,7 @@ ASR:
     boosting_table_name: ""
     correct_table_name: ""
     output_dir: tmp/
-  # Monolith / manager-api compatible alias (mirrored by model-admin if needed)
+  # Monolith / manager-api compatible alias (mirrored by control-admin if needed)
   DoubaoASR:
     type: doubao
     appid: ""

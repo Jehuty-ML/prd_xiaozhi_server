@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import copy
 import json
@@ -7,11 +7,20 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-import yaml
 from loguru import logger
 
-from xiaozhi_common.constants import ACCESS_SERVICE
+from xiaozhi_common.constants import (
+    ACCESS_SERVICE,
+    AGENT_SERVICE,
+    PREPROCESS_SERVICE,
+    RECEIVER_SERVICE,
+    SPEAKER_SERVICE,
+)
 from xiaozhi_common.grpc.client import GrpcClientPool
+from xiaozhi_common.config_files import (
+    redact_secrets,
+    snapshot_for_peer,
+)
 from xiaozhi import admin_pb2, admin_pb2_grpc
 from app.core.handler.manage_api_client import ManageApiClient
 
@@ -78,14 +87,14 @@ def merge_api_config(
 
     merged_server = {
         "ip": bind_server.get("ip", "0.0.0.0"),
-        "port": bind_server.get("port", 8103),
-        "http_port": bind_server.get("http_port", 8004),
+        "port": bind_server.get("port", 8000),
+        "http_port": bind_server.get("http_port", 8003),
         "vision_explain": bind_server.get("vision_explain", ""),
         "auth_key": bind_server.get("auth_key", ""),
         "auth": merged_auth,
         "websocket": bind_server.get(
             "websocket",
-            api_server.get("websocket", "ws://127.0.0.1:8103/xiaozhi/v1/"),
+            api_server.get("websocket", "ws://127.0.0.1:8000/xiaozhi/v1/"),
         ),
     }
 
@@ -147,27 +156,30 @@ def merge_api_config(
 
 
 class ConfigStore:
-    """Local YAML + optional manage-api pull, with hot-update broadcast to peers."""
+    """Template config.yaml + private data/.config.yaml + optional manager-api."""
 
     def __init__(
         self,
         config_path: Optional[Path] = None,
         pool: Optional[GrpcClientPool] = None,
     ) -> None:
-        self.config_path = (
-            config_path or Path(__file__).resolve().parents[3] / "config.yaml"
-        )
+        service_root = Path(__file__).resolve().parents[3]
+        self.service_root = service_root
+        self.config_path = config_path or (service_root / "config.yaml")
+        self.private_path = service_root / "data" / ".config.yaml"
         self.pool = pool
         self._lock = threading.RLock()
         self._listeners: list[Callable[[dict[str, Any], str], None]] = []
+        self._template: dict[str, Any] = {}
+        self._private: dict[str, Any] = {}
         self._data: dict[str, Any] = {
             "server": {
                 "name": "xiaozhi-microserver",
                 "phase": 2,
                 "environment": "development",
-                "http_port": 8004,
-                "port": 8103,
-                "websocket": "ws://127.0.0.1:8103/xiaozhi/v1/",
+                "http_port": 8003,
+                "port": 8000,
+                "websocket": "ws://127.0.0.1:8000/xiaozhi/v1/",
                 "auth_key": "",
                 "auth": {"enabled": False},
                 "connection": {
@@ -220,26 +232,49 @@ class ConfigStore:
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"Config listener failed: {exc}")
 
-    def _load_yaml(self) -> dict[str, Any]:
-        if not self.config_path.exists():
-            return {}
-        loaded = yaml.safe_load(self.config_path.read_text(encoding="utf-8")) or {}
-        return loaded if isinstance(loaded, dict) else {}
+    def _load_local_pair(self) -> dict[str, Any]:
+        """config.yaml < data/.config.yaml (monolith order)."""
+        from xiaozhi_common.config_files import read_yaml_file
+
+        # Allow tests to inject config_path; private stays beside that file's service root.
+        if self.config_path != self.service_root / "config.yaml":
+            template_path = self.config_path
+            private_path = self.config_path.parent / "data" / ".config.yaml"
+        else:
+            template_path = self.service_root / "config.yaml"
+            private_path = self.service_root / "data" / ".config.yaml"
+
+        template = read_yaml_file(template_path)
+        private = read_yaml_file(private_path)
+        self.config_path = template_path
+        self.private_path = private_path
+        self._template = template
+        self._private = private
+        merged = deep_merge(template, private) if private else dict(template)
+        if template_path.exists():
+            logger.info(f"Config template loaded from {template_path}")
+        else:
+            logger.warning(f"Config template missing: {template_path}")
+        if private and private_path.exists():
+            logger.info(f"Config private overlay loaded from {private_path}")
+        return merged
 
     def reload(
         self, reason: str = "startup", *, broadcast: bool = True, pull_api: bool = True
     ) -> dict[str, Any]:
         with self._lock:
-            local = self._load_yaml()
+            local = self._load_local_pair()
             if local:
                 self._data = deep_merge(self._data, local)
-                # Normalize manager-api keys
                 api = self._data.get("manager-api") or self._data.get("manager_api") or {}
                 self._data["manager-api"] = dict(api)
                 self._data["manager_api"] = dict(api)
-                logger.info(f"Config loaded from {self.config_path} reason={reason}")
+                logger.info(
+                    f"Config merged local template+private reason={reason} "
+                    f"private={self.private_path.exists()}"
+                )
             else:
-                logger.info(f"Config file missing ({self.config_path}); using defaults")
+                logger.info("Config files missing; using in-memory defaults")
 
             self._api_client = ManageApiClient(self._data)
 
@@ -248,15 +283,19 @@ class ConfigStore:
                 try:
                     api_cfg = self._api_client.get_server_config_sync()
                     if api_cfg:
-                        default_server = local.get("server") if local else {}
+                        # Bind ports: template < private (local wins over API).
+                        default_server = deep_merge(
+                            dict(self._template.get("server") or {}),
+                            dict(self._private.get("server") or {}),
+                        )
                         self._data = merge_api_config(
                             self._data, api_cfg, default_server=default_server
                         )
+                        self._data["read_config_from_api"] = True
                         logger.info("Config merged from manager-api")
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(f"manager-api pull failed: {exc}")
             else:
-                # Local-only path: still mirror Doubao*/ChatGLM* dual names
                 self._data = mirror_provider_aliases(self._data)
 
             snapshot = copy.deepcopy(self._data)
@@ -267,10 +306,11 @@ class ConfigStore:
         snapshot["_broadcast"] = broadcast_result
         return snapshot
 
-    def get(self, key: str = "") -> Any:
+    def get(self, key: str = "", *, redact: bool = False) -> Any:
         with self._lock:
             if not key:
-                return copy.deepcopy(self._data)
+                data = copy.deepcopy(self._data)
+                return redact_secrets(data) if redact else data
             cur: Any = self._data
             for part in key.split("."):
                 if not isinstance(cur, dict) or part not in cur:
@@ -278,21 +318,41 @@ class ConfigStore:
                 cur = cur[part]
             return copy.deepcopy(cur)
 
-    def as_json(self, key: str = "") -> str:
+    def as_json(self, key: str = "", *, for_service: str = "") -> str:
+        if for_service:
+            with self._lock:
+                full = copy.deepcopy(self._data)
+            peer = snapshot_for_peer(full, for_service, access_service=ACCESS_SERVICE)
+            if key:
+                cur: Any = peer
+                for part in key.split("."):
+                    if not isinstance(cur, dict) or part not in cur:
+                        cur = {}
+                        break
+                    cur = cur[part]
+                return json.dumps(cur if cur is not None else {}, ensure_ascii=False)
+            return json.dumps(peer, ensure_ascii=False)
         value = self.get(key)
         return json.dumps(value if value is not None else {}, ensure_ascii=False)
 
     def broadcast(self, reason: str = "reload") -> dict[str, Any]:
-        """Push config snapshot to access (and future peers)."""
+        """Push peer-scoped config snapshots (secrets redacted except access)."""
         if not self.pool:
             logger.debug("No gRPC pool; skip config broadcast")
             return {"access": "skipped"}
 
-        config_json = self.as_json()
         message_id = uuid.uuid4().hex
         results: dict[str, Any] = {}
+        peers = (
+            ("access", ACCESS_SERVICE),
+            ("agent", AGENT_SERVICE),
+            ("receiver", RECEIVER_SERVICE),
+            ("speaker", SPEAKER_SERVICE),
+            ("preprocess", PREPROCESS_SERVICE),
+        )
 
-        def _apply(service_name: str) -> str:
+        def _apply(service_name: str, label: str) -> str:
+            config_json = self.as_json(for_service=service_name)
             stub = admin_pb2_grpc.ConfigApplyServiceStub(self.pool.channel(service_name))
             resp = stub.ApplyConfig(
                 admin_pb2.ApplyConfigRequest(
@@ -307,10 +367,11 @@ class ConfigStore:
                 raise RuntimeError(resp.msg or "apply failed")
             return resp.result or "ok"
 
-        try:
-            results["access"] = _apply(ACCESS_SERVICE)
-            logger.info(f"Broadcast config to access ok reason={reason}")
-        except Exception as exc:  # noqa: BLE001
-            results["access"] = f"error:{exc}"
-            logger.warning(f"Broadcast to access failed: {exc}")
+        for label, service_name in peers:
+            try:
+                results[label] = _apply(service_name, label)
+                logger.info(f"Broadcast config to {label} ok reason={reason}")
+            except Exception as exc:  # noqa: BLE001
+                results[label] = f"error:{exc}"
+                logger.warning(f"Broadcast to {label} failed: {exc}")
         return results

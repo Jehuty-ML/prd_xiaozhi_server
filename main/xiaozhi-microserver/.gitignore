@@ -10,3 +10,7 @@ nacos-data/
 .venv/
 venv/
 .env
+
+# Private overlays (monolith-compatible). Never commit secrets here.
+**/data/.config.yaml
+**/.config.yaml

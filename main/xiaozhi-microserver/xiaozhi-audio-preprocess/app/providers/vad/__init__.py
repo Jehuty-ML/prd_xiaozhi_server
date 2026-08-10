@@ -18,6 +18,12 @@ def create_vad(
     )
     block = (config.get("VAD") or {}).get(selected) or {"type": "stub"}
     vad_type = str(block.get("type") or "stub").lower()
+    try:
+        from xiaozhi_common.provider_support import raise_if_unsupported
+
+        raise_if_unsupported("VAD", vad_type, selected)
+    except ImportError:  # pragma: no cover
+        pass
     if vad_type in ("silero", "silero_vad"):
         try:
             from app.providers.vad.silero import SileroVAD

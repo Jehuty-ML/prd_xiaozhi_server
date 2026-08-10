@@ -1,4 +1,4 @@
-﻿# xiaozhi-microserver
+# xiaozhi-microserver
 
 将开源单体 [`xiaozhi-server`](../xiaozhi-server) 按 Nacos + gRPC 微服务架构拆分后的实现（**第六期：收口 — 韧性 / 指标 / 连接上限 / 生产 compose / 门禁；单体退役**）。
 
@@ -9,29 +9,29 @@
 
 | 目录 | Nacos 名 | Dev 端口 | 职责 |
 |------|----------|----------|------|
-| `xiaozhi-access` | `xiaozhi-access-grpc-service` | HTTP **8103** / gRPC **50051** | 设备 WebSocket 入口、鉴权、连接上限、协议解复用、会话状态、下行 TTS/指令回写；上行转 preprocess；MCP/IoT 代理到 agent |
+| `xiaozhi-access` | `xiaozhi-access-grpc-service` | HTTP **8000** / gRPC **50051** | 设备 WebSocket 入口、鉴权、连接上限、协议解复用、会话状态、下行 TTS/指令回写；上行转 preprocess；MCP/IoT 代理到 agent |
 | `xiaozhi-agent` | `xiaozhi-agent-grpc-service` | gRPC **50052** | Intent / LLM / Memory / 工具插件 / MCP·IoT（经 access 代理）；句子流给 speaker |
 | `xiaozhi-audio-speaker` | `xiaozhi-audio-speaker-grpc-service` | gRPC **50053** | TTS 合成与分句队列、rate controller；经 access `SendTtsAudio` 写回设备；推 AEC 参考音到 preprocess |
 | `xiaozhi-audio-preprocess` | `xiaozhi-audio-preprocess-grpc-service` | gRPC **50054** | Opus 解码 / VAD 分句 / AEC；调 receiver ASR；通知 access 听状态；投递文本给 agent |
 | `xiaozhi-audio-receiver` | `xiaozhi-audio-receiver-grpc-service` | gRPC **50055** | ASR：PCM → 文本（含声纹扩展位） |
-| `xiaozhi-model-admin` | `xiaozhi-model-admin-grpc-service` | HTTP **8004** / gRPC **50056** | 配置 / 热更新广播 / manager-api 对接 / OTA·视觉·health·metrics；`broadcast_speak` 控制面 |
+| `xiaozhi-control-admin` | `xiaozhi-control-admin-grpc-service` | HTTP **8003** / gRPC **50056** | 配置 / 热更新广播 / manager-api 对接 / OTA·视觉·health·metrics；`broadcast_speak` 控制面 |
 
 公共库：`common/xiaozhi_common`（配置、Nacos、gRPC、session DTO、auth / runtime_env / **resilience** / **metrics**）+ `common/proto`（统一契约）。
 
-> 并存说明：原单体常用 HTTP `8003`，本仓库 access 默认用 **8103**。删除单体主线后可按需改回 8003。
+> 设备侧地址对齐开源单体：WebSocket `ws://host:8000/xiaozhi/v1/`，OTA `http://host:8003/xiaozhi/ota/`（与 `xiaozhi-server` 的 `server.port` / `server.http_port` 一致）。
 
 ## 第六期能力（当前）
 
 - **韧性**：`xiaozhi_common.resilience` — 超时 / 有限重试 / 熔断；ASR·LLM·关键 gRPC 已接入；失败降级话术
 - **指标**：access `GET /metrics`（`xiaozhi_ws_active_connections` 等）；admin 控制面指标；上游调用 / 熔断状态
 - **连接上限**：`max_connections` / `max_connections_per_device`；`/ready` 打满 503；重连替换旧 socket（不污染索引）
-- **生产门禁**：`XIAOZHI_ENV=production` 时 model-admin 敏感路由需 `Bearer` / `X-Admin-Token`
+- **生产门禁**：`XIAOZHI_ENV=production` 时 control-admin 敏感路由需 `Bearer` / `X-Admin-Token`
 - **生产 compose**：`docker-compose.prod.yml` + `deploy/production/config.overlay.yaml`
 - **CI / 文档**：门禁切到本目录；单体见 `xiaozhi-server/RETIRED.md`
 - 继承第五期：VAD / ASR / AEC / listen / Abort；第四期 TTS；第三期 Agent
 
 ```
-Device --OTA--> model-admin
+Device --OTA--> control-admin
 Device --WS--> access --gRPC--> preprocess (VAD/AEC) --gRPC--> receiver (ASR)
                               |--gRPC--> agent (LLM / tools / Session)
                               |            |--SpeakText--> speaker (EchoTTS / EdgeTTS)
@@ -39,8 +39,8 @@ Device --WS--> access --gRPC--> preprocess (VAD/AEC) --gRPC--> receiver (ASR)
                               |--HandleDeviceEvent (mcp/iot)
                               |--Abort --> agent + speaker + preprocess
 speaker --PushAecReference--> preprocess
-model-admin --ApplyConfig--> access
-model-admin --BroadcastSpeak--> speaker --SendTtsAudio--> access
+control-admin --ApplyConfig--> access
+control-admin --BroadcastSpeak--> speaker --SendTtsAudio--> access
 ```
 
 ## 快速开始
@@ -71,6 +71,20 @@ python scripts/run_tests.py --unit-only
 默认带 `--disable_nacos`，用静态端口互发现。有 Nacos 时去掉该参数，并配置 `--nacos_host` / `--group_name` / `--env_id`。
 
 可用 `--peer name=host:port` 覆盖发现地址。
+
+### 聊天历史上报（RabbitMQ，方案 A）
+
+链路：`xiaozhi-agent` 发布 → RabbitMQ 队列 `xiaozhi.chat.history` → **manager-api** 内 Spring AMQP 消费 → `AgentChatHistoryBizService.report` 落库。
+
+`xiaozhi-control-admin` **不参与** 聊天队列（只做 OTA / 配置 / 热更等控制面）。
+
+默认关闭。启用步骤：
+
+1. 启动 RabbitMQ（本地 compose 已含 `rabbitmq:3-management`，管理台 `http://127.0.0.1:15672` guest/guest）
+2. agent：`xiaozhi-agent/config.yaml` 设 `rabbitmq.enabled: true`（且 `chat_history.report_enabled` 不为 false）
+3. manager-api：`application.yml` / 环境变量设 `xiaozhi.rabbitmq.enabled=true`（并配置 host/凭据）
+
+`enabled=false` 时 agent 为 no-op，manager-api 不启动监听，不影响现有冒烟。
 
 ### 生产 compose
 
@@ -198,7 +212,7 @@ ASR:
 | agent | `LLM: Doubao` | `DoubaoLLM` |
 | speaker | `TTS: Doubao` | `DoubaoTTS` |
 
-启用智控台时，在 model-admin 设 `manager_api.enabled: true` 并填 `url`/`secret`；下发的 `DoubaoASR` 等长名会在合并时镜像为短名（见 `xiaozhi_common.provider_aliases`）。
+启用智控台时，在 control-admin 设 `manager_api.enabled: true` 并填 `url`/`secret`；下发的 `DoubaoASR` 等长名会在合并时镜像为短名（见 `xiaozhi_common.provider_aliases`）。
 
 ### C 默认栈（对齐单体常用组合）
 
@@ -211,15 +225,15 @@ ASR:
 | Memory / Intent | `nomem` / `function_call` |
 ### 手动探活
 
-- Access health / ready / metrics: `http://127.0.0.1:8103/health` 、`/ready` 、`/metrics`
-- Model-admin: `http://127.0.0.1:8004/health` 、`/ready` 、`/metrics` 、`/config`
-- OTA: `POST http://127.0.0.1:8004/xiaozhi/ota/`（header: `device-id` / `client-id`）
-- Vision: `GET|POST http://127.0.0.1:8004/mcp/vision/explain`
-- Broadcast: `POST http://127.0.0.1:8004/broadcast_speak` body `{"text":"全员播报测试"}`（生产需 admin token）
-- WS: `ws://127.0.0.1:8103/xiaozhi/v1/?device-id=test-001`  
+- Access health / ready / metrics: `http://127.0.0.1:8000/health` 、`/ready` 、`/metrics`
+- control-admin: `http://127.0.0.1:8003/health` 、`/ready` 、`/metrics` 、`/config`
+- OTA: `POST http://127.0.0.1:8003/xiaozhi/ota/`（header: `device-id` / `client-id`）
+- Vision: `GET|POST http://127.0.0.1:8003/mcp/vision/explain`
+- Broadcast: `POST http://127.0.0.1:8003/broadcast_speak` body `{"text":"全员播报测试"}`（生产需 admin token）
+- WS: `ws://127.0.0.1:8000/xiaozhi/v1/?device-id=test-001`  
   发送：`{"type":"listen","state":"detect","text":"现在几点了"}`，应收到 `type=tts`（`state=start` / `sentence_start` / Opus / `stop`）。
 - 音频链路：`listen start` → 二进制 Opus → VAD 分句 → ASR → `type=stt` + agent 对话 → TTS。
-- 热更新：`POST http://127.0.0.1:8004/config/reload`（会广播到 access；生产需 token）
+- 热更新：`POST http://127.0.0.1:8003/config/reload`（会广播到 access；生产需 token）
 
 ## 与单体模块映射
 
@@ -230,9 +244,9 @@ ASR:
 | `providers/asr` / voiceprint | `xiaozhi-audio-receiver` |
 | `chat` / `llm` / `intent` / `memory` / `tools` / `plugins_func` | `xiaozhi-agent` |
 | `providers/tts` / `sendAudioHandle` / `audioRateController` | `xiaozhi-audio-speaker` |
-| `http_server` / OTA·vision / `config/*` / `modules_initialize` / health·metrics | `xiaozhi-model-admin` |
+| `http_server` / OTA·vision / `config/*` / `modules_initialize` / health·metrics | `xiaozhi-control-admin` |
 
-`manager-api` / `manager-web` **不拆进**这六服务，由 `xiaozhi-model-admin` 对接。
+`manager-api` / `manager-web` **不拆进**这六服务，由 `xiaozhi-control-admin` 对接。
 
 ## Proto
 
@@ -251,7 +265,7 @@ ASR:
 
 ### 第二期（完成）
 
-- OTA / vision / health / metrics → `xiaozhi-model-admin`
+- OTA / vision / health / metrics → `xiaozhi-control-admin`
 - 完整 WS 协议、连接上限、生产鉴权 → `xiaozhi-access`
 - manage-api 配置拉取与热更新广播
 
@@ -306,7 +320,7 @@ xiaozhi-microserver/
   xiaozhi-audio-preprocess/
   xiaozhi-audio-receiver/
   xiaozhi-audio-speaker/
-  xiaozhi-model-admin/
+  xiaozhi-control-admin/
   scripts/…  tests/test_*_phase*.py  tests/test_phase6_resilience.py
   tests/test_provider_align.py
   requirements-funasr.txt   # optional FunASR/torch

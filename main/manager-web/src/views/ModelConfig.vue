@@ -523,11 +523,10 @@ export default {
       });
     },
     // 处理启用/禁用状态变更
+    // el-switch 的 @change 触发时 v-model 已是新值，切勿再取反
     handleStatusChange(model) {
-      const newStatus = model.isEnabled ? 1 : 0;
-      const originalStatus = model.isEnabled;
-
-      model.isEnabled = !model.isEnabled;
+      const newStatus = model.isEnabled === 1 || model.isEnabled === true ? 1 : 0;
+      const previousStatus = newStatus === 1 ? 0 : 1;
 
       Api.model.updateModelStatus(model.id, newStatus, ({ data }) => {
         if (data.code === 0) {
@@ -536,13 +535,10 @@ export default {
               ? this.$t("modelConfig.enableSuccess")
               : this.$t("modelConfig.disableSuccess")
           );
-          // 保持新状态
           model.isEnabled = newStatus;
-          // 刷新表格数据
           this.loadData();
         } else {
-          // 操作失败时恢复原状态
-          model.isEnabled = originalStatus;
+          model.isEnabled = previousStatus;
           this.$message.error(data.msg || this.$t("modelConfig.operationFailed"));
         }
       });

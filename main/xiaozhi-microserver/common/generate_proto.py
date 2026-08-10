@@ -12,6 +12,20 @@ OUT_DIR = ROOT / "generated" / "xiaozhi"
 
 
 def main() -> int:
+    try:
+        import google.protobuf as _pb
+
+        major = int(str(_pb.__version__).split(".", 1)[0])
+        if major >= 6:
+            print(
+                f"WARNING: generating with protobuf {_pb.__version__} via {sys.executable}.\n"
+                "  Runtime in xiaozhi-esp32-server env is pinned to protobuf<6.\n"
+                "  Use: conda run -n xiaozhi-esp32-server python common/generate_proto.py",
+                file=sys.stderr,
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     (OUT_DIR / "__init__.py").write_text("", encoding="utf-8")
     protos = sorted(PROTO_DIR.glob("*.proto"))

@@ -1,4 +1,4 @@
-# 生产叠加：xiaozhi-microserver（六服务）
+﻿# 生产叠加：xiaozhi-microserver（六服务）
 # 用法：
 #   cp .env.example .env
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
@@ -6,19 +6,19 @@
 # 主线 config.yaml 仍为 development；生产项由 deploy/production/config.overlay.yaml 覆盖
 
 services:
-  xiaozhi-model-admin:
+  xiaozhi-control-admin:
     environment:
       - TZ=${TZ:-Asia/Shanghai}
       - XIAOZHI_ENV=production
     volumes:
-      - ./deploy/production/config.overlay.yaml:/app/xiaozhi-model-admin/data/.config.yaml:ro
+      - ./deploy/production/config.overlay.yaml:/app/xiaozhi-control-admin/data/.config.yaml:ro
     healthcheck:
       test:
         [
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/health', timeout=3)",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/health', timeout=3)",
         ]
       interval: 15s
       timeout: 5s
@@ -35,7 +35,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8103/health', timeout=3)",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)",
         ]
       interval: 15s
       timeout: 5s

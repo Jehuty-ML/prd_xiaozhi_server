@@ -1,4 +1,4 @@
-"""Provider dual-name aliases + factory routing (FunASR/Doubao/ChatGLM)."""
+﻿"""Provider dual-name aliases + factory routing (FunASR/Doubao/ChatGLM)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ MICRO_ROOT = Path(__file__).resolve().parents[1]
 RECEIVER_ROOT = MICRO_ROOT / "xiaozhi-audio-receiver"
 SPEAKER_ROOT = MICRO_ROOT / "xiaozhi-audio-speaker"
 AGENT_ROOT = MICRO_ROOT / "xiaozhi-agent"
-ADMIN_ROOT = MICRO_ROOT / "xiaozhi-model-admin"
+ADMIN_ROOT = MICRO_ROOT / "xiaozhi-control-admin"
 
 
 def _clear_app() -> None:
@@ -32,7 +32,7 @@ def _prep(service_root: Path) -> None:
                 for x in (
                     "xiaozhi-audio-",
                     "xiaozhi-agent",
-                    "xiaozhi-model-admin",
+                    "xiaozhi-control-admin",
                     "xiaozhi-access",
                 )
             ):
@@ -91,6 +91,46 @@ def test_alias_resolve_and_mirror():
     assert "Doubao" in mirrored["ASR"] and "DoubaoASR" in mirrored["ASR"]
     assert "DoubaoTTS" in mirrored["TTS"]
     assert "Doubao" in mirrored["LLM"]
+
+
+def test_llm_prefers_manager_api_key_over_local_placeholder():
+    """Local Doubao api_key='' must not beat LLM_DoubaoLLM from 智控台."""
+    sys.path.insert(0, str(MICRO_ROOT / "common"))
+    from xiaozhi_common.provider_aliases import (
+        mirror_provider_aliases,
+        resolve_block,
+    )
+
+    cfg = {
+        "selected_module": {"LLM": "LLM_DoubaoLLM"},
+        "LLM": {
+            "Doubao": {
+                "type": "openai",
+                "api_key": "",
+                "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+                "model_name": "doubao-1-5-pro-32k-250115",
+            },
+            "DoubaoLLM": {
+                "type": "openai",
+                "api_key": "",
+                "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+                "model_name": "doubao-1-5-pro-32k-250115",
+            },
+            "LLM_DoubaoLLM": {
+                "type": "openai",
+                "api_key": "61d3-real-key",
+                "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+                "model_name": "doubao-1-5-pro-32k-250115",
+            },
+        },
+    }
+    mirrored = mirror_provider_aliases(dict(cfg))
+    assert mirrored["selected_module"]["LLM"] == "Doubao"
+    assert mirrored["LLM"]["Doubao"]["api_key"] == "61d3-real-key"
+    selected, key, block = resolve_block(mirrored, "LLM")
+    assert selected == "Doubao"
+    assert block["api_key"] == "61d3-real-key"
+    assert key in ("Doubao", "DoubaoLLM", "LLM_DoubaoLLM")
 
 
 def test_asr_factory_doubao_missing_creds_falls_back():
@@ -181,13 +221,27 @@ def test_llm_factory_chatglm_doubao_aliases_need_key():
         assert isinstance(llm, EchoLLM), name
 
 
+def test_llm_factory_unsupported_type_raises():
+    _prep(AGENT_ROOT)
+    from app.providers.llm import create_llm
+    import pytest
+
+    with pytest.raises(ValueError, match="当前还不支持"):
+        create_llm(
+            {
+                "selected_module": {"LLM": "Dify"},
+                "LLM": {"Dify": {"type": "dify", "api_key": "k"}},
+            }
+        )
+
+
 def test_merge_api_config_mirrors_aliases():
     _prep(ADMIN_ROOT)
     from app.core.handler.config_store import merge_api_config
 
     local = {
         "manager-api": {"url": "http://x", "secret": "s", "enabled": True},
-        "server": {"port": 8103},
+        "server": {"port": 8000},
     }
     api = {
         "selected_module": {"ASR": "DoubaoASR", "TTS": "DoubaoTTS", "LLM": "ChatGLMLLM"},

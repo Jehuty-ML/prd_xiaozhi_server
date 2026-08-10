@@ -13,7 +13,7 @@ from loguru import logger
 from xiaozhi import admin_pb2, admin_pb2_grpc, audio_pb2, audio_pb2_grpc
 from xiaozhi_common.constants import (
     AGENT_SERVICE,
-    MODEL_ADMIN_SERVICE,
+    CONTROL_ADMIN_SERVICE,
     PREPROCESS_SERVICE,
     SPEAKER_SERVICE,
 )
@@ -431,7 +431,7 @@ async def _reload_via_admin(pool: GrpcClientPool, reason: str) -> bool:
     message_id = uuid.uuid4().hex
 
     def _call():
-        stub = admin_pb2_grpc.ModelAdminServiceStub(pool.channel(MODEL_ADMIN_SERVICE))
+        stub = admin_pb2_grpc.ModelAdminServiceStub(pool.channel(CONTROL_ADMIN_SERVICE))
         return stub.ReloadConfig(
             admin_pb2.ReloadConfigRequest(message_id=message_id, reason=reason),
             metadata=pool.metadata(message_id=message_id),

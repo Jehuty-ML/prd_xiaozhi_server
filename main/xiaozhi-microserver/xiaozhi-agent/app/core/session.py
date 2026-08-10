@@ -44,6 +44,7 @@ class Session:
     mcp_call_futures: dict[int, Any] = field(default_factory=dict)
     mcp_next_id: int = 1
     extras: dict[str, Any] = field(default_factory=dict)
+    llm: Any = None
     _speak_index: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -159,7 +160,16 @@ class SessionStore:
 
     def __init__(self) -> None:
         self._sessions: dict[str, Session] = {}
+        self._chat_locks: dict[str, threading.Lock] = {}
         self._lock = threading.Lock()
+
+    def chat_lock(self, client_id: str) -> threading.Lock:
+        with self._lock:
+            lock = self._chat_locks.get(client_id)
+            if lock is None:
+                lock = threading.Lock()
+                self._chat_locks[client_id] = lock
+            return lock
 
     def get_or_create(
         self,
@@ -169,6 +179,8 @@ class SessionStore:
         *,
         prompt: str = "",
         intent_type: str = "function_call",
+        device_id: str = "",
+        llm: Any = None,
     ) -> Session:
         with self._lock:
             session = self._sessions.get(client_id)
@@ -179,16 +191,45 @@ class SessionStore:
                     config=config,
                     prompt=prompt,
                     intent_type=intent_type,
+                    device_id=device_id or client_id,
+                    llm=llm,
                 )
                 if prompt:
                     session.dialogue.put(Message(role="system", content=prompt))
                 self._sessions[client_id] = session
             else:
                 session.config = config
+                if device_id:
+                    session.device_id = device_id
+                if llm is not None:
+                    session.llm = llm
                 if prompt and prompt != session.prompt:
                     session.change_system_prompt(prompt)
                 session.intent_type = intent_type
             return session
+
+    def apply_private_config(
+        self,
+        client_id: str,
+        pool: GrpcClientPool,
+        private_config: dict[str, Any],
+        *,
+        device_id: str = "",
+        base_config: dict[str, Any] | None = None,
+        prompt: str = "",
+        intent_type: str = "function_call",
+        llm: Any = None,
+    ) -> Session:
+        """Create/update session with device private config overlay."""
+        return self.get_or_create(
+            client_id,
+            pool,
+            private_config if private_config else (base_config or {}),
+            prompt=prompt,
+            intent_type=intent_type,
+            device_id=device_id,
+            llm=llm,
+        )
 
     def get(self, client_id: str) -> Optional[Session]:
         return self._sessions.get(client_id)

@@ -1,4 +1,4 @@
-"""Phase-6: resilience, connection manager, admin auth gate."""
+﻿"""Phase-6: resilience, connection manager, admin auth gate."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 
 MICRO_ROOT = Path(__file__).resolve().parents[1]
 ACCESS_ROOT = MICRO_ROOT / "xiaozhi-access"
-ADMIN_ROOT = MICRO_ROOT / "xiaozhi-model-admin"
+ADMIN_ROOT = MICRO_ROOT / "xiaozhi-control-admin"
 COMMON = MICRO_ROOT / "common"
 
 
@@ -27,7 +27,7 @@ def _use_paths(*roots: Path) -> None:
     ]
     service_markers = (
         "xiaozhi-access",
-        "xiaozhi-model-admin",
+        "xiaozhi-control-admin",
         "xiaozhi-agent",
         "xiaozhi-audio-speaker",
         "xiaozhi-audio-preprocess",
@@ -103,6 +103,43 @@ def test_retry_then_success():
 
     assert call_with_resilience("grpc", flaky, config=cfg, provider="x") == "ok"
     assert box["n"] == 2
+
+
+def test_wall_clock_timeout_raises_upstream_timeout():
+    _use_paths()
+    import time
+
+    from xiaozhi_common.resilience import (
+        UpstreamError,
+        UpstreamKind,
+        call_with_resilience,
+        reset_circuits_for_tests,
+    )
+
+    reset_circuits_for_tests()
+    cfg = {
+        "server": {
+            "resilience": {
+                "enabled": True,
+                "max_retries": 0,
+                "circuit_failure_threshold": 99,
+            }
+        }
+    }
+
+    def hang():
+        time.sleep(2.0)
+        return "late"
+
+    with pytest.raises(UpstreamError) as ei:
+        call_with_resilience(
+            "llm",
+            hang,
+            config=cfg,
+            provider="HangLLM",
+            timeout_seconds=0.3,
+        )
+    assert ei.value.kind == UpstreamKind.TIMEOUT
 
 
 def test_connection_manager_replace_does_not_corrupt():

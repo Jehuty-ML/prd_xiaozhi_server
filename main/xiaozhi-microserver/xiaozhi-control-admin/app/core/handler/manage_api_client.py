@@ -139,6 +139,41 @@ class ManageApiClient:
             },
         )
 
+    def get_agent_models_sync(
+        self, mac_address: str, client_id: str, selected_module: Dict
+    ) -> Optional[Dict]:
+        """Sync pull for WS connect / gRPC threads."""
+        if not self.enabled:
+            return None
+        with httpx.Client(
+            base_url=self.config.get("url"),
+            headers={
+                "User-Agent": f"XiaozhiMicroAdmin/2.0-sync (PID:{os.getpid()})",
+                "Accept": "application/json",
+                "Authorization": "Bearer " + self._secret,
+            },
+            timeout=self.config.get("timeout", 30),
+            trust_env=False,
+        ) as client:
+            response = client.post(
+                "/config/agent-models",
+                json={
+                    "macAddress": mac_address,
+                    "clientId": client_id,
+                    "selectedModule": selected_module or {},
+                },
+            )
+            response.raise_for_status()
+            result = response.json()
+            code = result.get("code")
+            if code == 10041:
+                raise DeviceNotFoundException(result.get("msg"))
+            if code == 10042:
+                raise DeviceBindException(str(result.get("msg") or ""))
+            if code != 0:
+                raise Exception(f"API返回错误: {result.get('msg', '未知错误')}")
+            return result.get("data")
+
     async def aclose(self) -> None:
         for client in list(self._clients.values()):
             try:

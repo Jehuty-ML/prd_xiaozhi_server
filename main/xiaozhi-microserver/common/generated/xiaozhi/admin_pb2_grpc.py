@@ -5,7 +5,7 @@ import warnings
 
 from . import admin_pb2 as admin__pb2
 
-GRPC_GENERATED_VERSION = '1.83.0'
+GRPC_GENERATED_VERSION = '1.71.2'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -18,14 +18,14 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + ' but the generated code in admin_pb2_grpc.py depends on'
+        + f' but the generated code in admin_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
     )
 
 
-class ModelAdminServiceStub:
+class ModelAdminServiceStub(object):
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -51,7 +51,7 @@ class ModelAdminServiceStub:
                 _registered_method=True)
 
 
-class ModelAdminServiceServicer:
+class ModelAdminServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def GetConfig(self, request, context):
@@ -98,7 +98,7 @@ def add_ModelAdminServiceServicer_to_server(servicer, server):
 
 
  # This class is part of an EXPERIMENTAL API.
-class ModelAdminService:
+class ModelAdminService(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
@@ -183,7 +183,7 @@ class ModelAdminService:
             _registered_method=True)
 
 
-class ConfigApplyServiceStub:
+class ConfigApplyServiceStub(object):
     """Implemented by peer services; model-admin is the gRPC client.
     """
 
@@ -200,7 +200,7 @@ class ConfigApplyServiceStub:
                 _registered_method=True)
 
 
-class ConfigApplyServiceServicer:
+class ConfigApplyServiceServicer(object):
     """Implemented by peer services; model-admin is the gRPC client.
     """
 
@@ -226,7 +226,7 @@ def add_ConfigApplyServiceServicer_to_server(servicer, server):
 
 
  # This class is part of an EXPERIMENTAL API.
-class ConfigApplyService:
+class ConfigApplyService(object):
     """Implemented by peer services; model-admin is the gRPC client.
     """
 

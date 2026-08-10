@@ -111,6 +111,12 @@ class ConnectionManager:
             meta = self._meta.setdefault(resolved, {})
             meta[key] = value
 
+    def update_meta(self, client_id: str, **kwargs: Any) -> None:
+        resolved = self.resolve_client_id(client_id) or client_id
+        with self._lock:
+            meta = self._meta.setdefault(resolved, {})
+            meta.update(kwargs)
+
     def get_meta(self, client_id: str) -> dict[str, Any]:
         resolved = self.resolve_client_id(client_id) or client_id
         return dict(self._meta.get(resolved) or {})

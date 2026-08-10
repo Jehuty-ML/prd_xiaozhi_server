@@ -14,9 +14,12 @@ class ModelAdminServicer(admin_pb2_grpc.ModelAdminServiceServicer):
 
     def GetConfig(self, request, context):  # noqa: N802, ANN001
         key = request.key or ""
-        logger.info(f"GetConfig service={request.service_name} key={key or '*'}")
+        service = request.service_name or ""
+        logger.info(f"GetConfig service={service or '-'} key={key or '*'}")
         return admin_pb2.GetConfigResponse(
-            code=0, msg="ok", config_json=self.store.as_json(key)
+            code=0,
+            msg="ok",
+            config_json=self.store.as_json(key, for_service=service),
         )
 
     def ReloadConfig(self, request, context):  # noqa: N802, ANN001
@@ -37,7 +40,7 @@ class ModelAdminServicer(admin_pb2_grpc.ModelAdminServiceServicer):
     def Health(self, request, context):  # noqa: N802, ANN001
         detail = {
             "status": "ok",
-            "service": "xiaozhi-model-admin",
+            "service": "xiaozhi-control-admin",
             "phase": 2,
             "config_keys": list(self.store.get().keys()),
             "read_config_from_api": bool(self.store.get("read_config_from_api")),

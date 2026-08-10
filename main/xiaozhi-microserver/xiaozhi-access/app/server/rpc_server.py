@@ -14,7 +14,7 @@ from xiaozhi_common.constants import (
     ACCESS_SERVICE,
     AGENT_SERVICE,
     DEFAULT_PORTS,
-    MODEL_ADMIN_SERVICE,
+    CONTROL_ADMIN_SERVICE,
     PREPROCESS_SERVICE,
     SPEAKER_SERVICE,
 )
@@ -39,7 +39,7 @@ from app.ws.manager import connection_manager
 def _pull_config_from_admin(pool: GrpcClientPool) -> None:
     message_id = uuid.uuid4().hex
     try:
-        stub = admin_pb2_grpc.ModelAdminServiceStub(pool.channel(MODEL_ADMIN_SERVICE))
+        stub = admin_pb2_grpc.ModelAdminServiceStub(pool.channel(CONTROL_ADMIN_SERVICE))
         resp = stub.GetConfig(
             admin_pb2.GetConfigRequest(
                 message_id=message_id,
@@ -73,7 +73,7 @@ def serve(config: BaseServerConfig) -> None:
 
     resolver = ServiceResolver(config, nacos)
     resolver.watch(PREPROCESS_SERVICE)
-    resolver.watch(MODEL_ADMIN_SERVICE)
+    resolver.watch(CONTROL_ADMIN_SERVICE)
     resolver.watch(AGENT_SERVICE)
     resolver.watch(SPEAKER_SERVICE)
     pool = GrpcClientPool(resolver)

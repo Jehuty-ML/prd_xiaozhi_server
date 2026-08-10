@@ -68,7 +68,7 @@ class VisionService:
         @router.get("/mcp/vision/explain")
         async def vision_get():
             return self._cors(
-                PlainTextResponse("Vision interface is running (xiaozhi-model-admin)")
+                PlainTextResponse("Vision interface is running (xiaozhi-control-admin)")
             )
 
         @router.post("/mcp/vision/explain")

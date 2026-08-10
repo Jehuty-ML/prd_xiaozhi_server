@@ -28,6 +28,12 @@ def create_asr(
     if not block:
         block = {"type": "stub"}
     asr_type = str(block.get("type") or "stub").lower()
+    try:
+        from xiaozhi_common.provider_support import raise_if_unsupported
+
+        raise_if_unsupported("ASR", asr_type, selected)
+    except ImportError:  # pragma: no cover
+        pass
 
     if asr_type in ("openai", "openai_compat", "whisper"):
         try:

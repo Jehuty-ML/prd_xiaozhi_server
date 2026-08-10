@@ -30,6 +30,7 @@ import xiaozhi.modules.model.dto.VoiceDTO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.model.service.ModelProviderService;
+import xiaozhi.modules.model.support.MicroserverProviderSupport;
 import xiaozhi.modules.timbre.service.TimbreService;
 
 @AllArgsConstructor
@@ -133,6 +134,9 @@ public class ModelController {
         if (status == 0 && entity.getIsDefault() > 0) {
             return new Result<Void>().error("默认模型配置不允许关闭");
         }
+        if (status != null && status == 1 && !MicroserverProviderSupport.isSupported(entity)) {
+            return new Result<Void>().error(MicroserverProviderSupport.unsupportedMessage(entity));
+        }
         // 不更新ConfigJson字段
         entity.setConfigJson(null);
         entity.setIsEnabled(status);
@@ -147,6 +151,9 @@ public class ModelController {
         ModelConfigEntity entity = modelConfigService.selectById(id);
         if (entity == null) {
             return new Result<Void>().error("模型配置不存在");
+        }
+        if (!MicroserverProviderSupport.isSupported(entity)) {
+            return new Result<Void>().error(MicroserverProviderSupport.unsupportedMessage(entity));
         }
         // 将其他模型设置为非默认
         modelConfigService.setDefaultModel(entity.getModelType(), 0);

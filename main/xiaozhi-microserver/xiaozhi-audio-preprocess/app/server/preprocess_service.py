@@ -74,6 +74,30 @@ class AudioPreprocessServicer(audio_pb2_grpc.AudioPreprocessServiceServicer):
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"SendToDevice failed: {exc}")
 
+    def _speak_text(self, client_id: str, message_id: str, text: str) -> None:
+        text = (text or "").strip()
+        if not text:
+            return
+        try:
+            stub = audio_pb2_grpc.AudioSpeakerServiceStub(
+                self.pool.channel(SPEAKER_SERVICE)
+            )
+            stub.SpeakText(
+                audio_pb2.SpeakRequest(
+                    message_id=message_id or uuid.uuid4().hex,
+                    client_id=client_id,
+                    text=text,
+                    emotion="neutral",
+                    index=1,
+                    total=1,
+                    end=True,
+                ),
+                metadata=self.pool.metadata(client_id, message_id),
+                timeout=min(30.0, self.pool.default_timeout("tts")),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"fallback SpeakText failed: {exc}")
+
     def _forward_text(self, client_id: str, message_id: str, text: str) -> str:
         stub = audio_pb2_grpc.AgentServiceStub(self.pool.channel(AGENT_SERVICE))
         timeout = self.pool.default_timeout("llm")
@@ -92,7 +116,15 @@ class AudioPreprocessServicer(audio_pb2_grpc.AudioPreprocessServiceServicer):
             return resp.result or ""
         except UpstreamError as exc:
             logger.warning(f"agent SendText upstream failed: {exc}")
-            return get_fallback_text(self.pool.config, "llm", exc.kind)
+            fallback = get_fallback_text(self.pool.config, "llm", exc.kind)
+            # Agent hang/timeout never reaches Session.speak — say it here.
+            self._speak_text(client_id, message_id, fallback)
+            return fallback
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"agent SendText failed: {exc}")
+            fallback = get_fallback_text(self.pool.config, "llm")
+            self._speak_text(client_id, message_id, fallback)
+            return fallback
 
     def _asr_recognize(self, client_id: str, message_id: str, pcm: bytes) -> str:
         stub = audio_pb2_grpc.AudioReceiverServiceStub(

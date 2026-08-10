@@ -1,4 +1,4 @@
-"""OTA endpoints for model-admin (FastAPI port of xiaozhi-server OTAHandler)."""
+﻿"""OTA endpoints for control-admin (FastAPI port of xiaozhi-server OTAHandler)."""
 
 from __future__ import annotations
 
@@ -105,7 +105,7 @@ class OtaService:
         configured = str(server.get("websocket") or "")
         if configured and "你的" not in configured:
             return configured
-        port = int(server.get("port", 8103))
+        port = int(server.get("port", 8000))
         return f"ws://{_local_ip()}:{port}/xiaozhi/v1/"
 
     def _download_base(self) -> str:
@@ -113,7 +113,7 @@ class OtaService:
         vision = str(server.get("vision_explain") or "")
         if vision and "/mcp/vision/explain" in vision:
             return vision.replace("/mcp/vision/explain", "")
-        http_port = int(server.get("http_port", 8004))
+        http_port = int(server.get("http_port", 8003))
         return f"http://{_local_ip()}:{http_port}"
 
     def _refresh_bin_cache(self) -> None:

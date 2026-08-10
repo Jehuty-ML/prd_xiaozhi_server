@@ -23,7 +23,12 @@ def create_memory(config: dict[str, Any], selected_name: str | None = None) -> M
     selected = selected_name or (config.get("selected_module") or {}).get("Memory") or "nomem"
     block = (config.get("Memory") or {}).get(selected) or {"type": "nomem"}
     mem_type = str(block.get("type") or "nomem").lower()
+    try:
+        from xiaozhi_common.provider_support import raise_if_unsupported
+
+        raise_if_unsupported("Memory", mem_type, selected)
+    except ImportError:  # pragma: no cover
+        pass
     if mem_type == "nomem":
         return NoMemProvider(block)
-    # Phase-3 ships nomem; other backends can be added later without API change.
     return NoMemProvider(block)

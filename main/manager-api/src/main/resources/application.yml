@@ -12,6 +12,17 @@ server:
       cookie:
         http-only: true
 
+xiaozhi:
+  rabbitmq:
+    # 默认关闭；开启后消费 agent 发布的聊天历史并落库
+    enabled: false
+    host: 127.0.0.1
+    port: 5672
+    username: guest
+    password: guest
+    virtual-host: /
+    queue: xiaozhi.chat.history
+
 spring:
   # 环境 dev|test|prod
   profiles:
@@ -26,6 +37,15 @@ spring:
       enabled: true
   main:
     allow-bean-definition-overriding: true
+  rabbitmq:
+    host: ${xiaozhi.rabbitmq.host:127.0.0.1}
+    port: ${xiaozhi.rabbitmq.port:5672}
+    username: ${xiaozhi.rabbitmq.username:guest}
+    password: ${xiaozhi.rabbitmq.password:guest}
+    virtual-host: ${xiaozhi.rabbitmq.virtual-host:/}
+    listener:
+      simple:
+        auto-startup: ${xiaozhi.rabbitmq.enabled:true}
 
 knife4j:
   enable: true

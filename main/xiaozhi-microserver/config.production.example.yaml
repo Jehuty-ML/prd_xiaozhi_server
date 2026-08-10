@@ -1,5 +1,5 @@
-# 生产示例配置片段（合并进 xiaozhi-model-admin/config.yaml 或 overlay）
-# 完整叠加见 deploy/production/config.overlay.yaml
+﻿# 鐢熶骇绀轰緥閰嶇疆鐗囨锛堝悎骞惰繘 xiaozhi-control-admin/config.yaml 鎴?overlay锛?
+# 瀹屾暣鍙犲姞瑙?deploy/production/config.overlay.yaml
 
 server:
   environment: production

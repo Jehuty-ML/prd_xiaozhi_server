@@ -1,4 +1,4 @@
-"""Phase-2 smoke: OTA POST on model-admin returns websocket URL."""
+﻿"""Phase-2 smoke: OTA POST on control-admin returns websocket URL."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import urllib.request
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base", default="http://127.0.0.1:8004")
+    parser.add_argument("--base", default="http://127.0.0.1:8003")
     args = parser.parse_args()
 
     url = args.base.rstrip("/") + "/xiaozhi/ota/"

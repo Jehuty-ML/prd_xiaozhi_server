@@ -1,16 +1,25 @@
 ﻿# Phase-6 local compose (no Nacos). Use --peer for cross-container discovery.
 # Production: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 services:
-  xiaozhi-model-admin:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+
+  xiaozhi-control-admin:
     image: python:3.12-slim
-    working_dir: /app/xiaozhi-model-admin
+    working_dir: /app/xiaozhi-control-admin
     volumes:
       - ./:/app
     command: >
       bash -c "pip install -q -r /app/requirements.txt &&
-      python main.py --env=dev --disable_nacos --grpc_port 50056 --http_port 8004"
+      python main.py --env=dev --disable_nacos --grpc_port 50056 --http_port 8003"
     ports:
-      - "8004:8004"
+      - "8003:8003"
       - "50056:50056"
 
   xiaozhi-audio-receiver:
@@ -31,10 +40,10 @@ services:
       - ./:/app
     command: >
       bash -c "pip install -q -r /app/requirements.txt &&
-      python main.py --env=dev --disable_nacos --grpc_port 50051 --http_port 8103
+      python main.py --env=dev --disable_nacos --grpc_port 50051 --http_port 8000
       --peer xiaozhi-audio-preprocess-grpc-service=xiaozhi-audio-preprocess:50054"
     ports:
-      - "8103:8103"
+      - "8000:8000"
       - "50051:50051"
 
   xiaozhi-audio-speaker:

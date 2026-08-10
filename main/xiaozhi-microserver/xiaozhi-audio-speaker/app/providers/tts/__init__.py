@@ -26,6 +26,12 @@ def create_tts(config: dict[str, Any], selected_name: str | None = None) -> TTSP
     if not block:
         block = {"type": "echo"}
     tts_type = str(block.get("type") or "echo").lower()
+    try:
+        from xiaozhi_common.provider_support import raise_if_unsupported
+
+        raise_if_unsupported("TTS", tts_type, selected)
+    except ImportError:  # pragma: no cover
+        pass
 
     if tts_type in ("edge", "edgetts"):
         try:

@@ -252,6 +252,33 @@ def reset_circuits_for_tests() -> None:
     _STORE.reset()
 
 
+def run_with_timeout(func: Callable[[], T], timeout_seconds: float) -> T:
+    """Run ``func`` in a daemon thread; raise TimeoutError if it exceeds limit.
+
+    Note: the worker cannot be force-killed; callers should mark sessions aborted
+    so a late stream stops producing side effects.
+    """
+    if timeout_seconds <= 0:
+        return func()
+
+    box: Dict[str, Any] = {}
+
+    def _runner() -> None:
+        try:
+            box["result"] = func()
+        except BaseException as exc:  # noqa: BLE001
+            box["exc"] = exc
+
+    thread = threading.Thread(target=_runner, name="xiaozhi-timeout", daemon=True)
+    thread.start()
+    thread.join(float(timeout_seconds))
+    if thread.is_alive():
+        raise TimeoutError(f"timed out after {timeout_seconds:.1f}s")
+    if "exc" in box:
+        raise box["exc"]
+    return box.get("result")  # type: ignore[return-value]
+
+
 def call_with_resilience(
     stage: str,
     func: Callable[[], T],
@@ -261,8 +288,14 @@ def call_with_resilience(
     max_retries: Optional[int] = None,
     retry_delay: Optional[float] = None,
     use_circuit: bool = True,
+    timeout_seconds: Optional[float] = None,
 ) -> T:
-    """Sync wrapper: circuit → limited retry → UpstreamError."""
+    """Sync wrapper: circuit → limited retry → UpstreamError.
+
+    Pass ``timeout_seconds`` (or use ``timeout_for_stage``) to enforce a
+    wall-clock limit via a daemon thread. Default is no extra timeout so
+    high-frequency gRPC paths are unaffected.
+    """
     settings = get_resilience_settings(config)
     if not settings.enabled:
         return func()
@@ -283,7 +316,10 @@ def call_with_resilience(
     last_exc: Optional[BaseException] = None
     for attempt in range(retries + 1):
         try:
-            result = func()
+            if timeout_seconds is not None and float(timeout_seconds) > 0:
+                result = run_with_timeout(func, float(timeout_seconds))
+            else:
+                result = func()
             if breaker:
                 breaker.record_success()
             try:

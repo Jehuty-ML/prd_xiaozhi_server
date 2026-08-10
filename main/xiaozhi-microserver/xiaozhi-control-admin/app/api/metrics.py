@@ -1,4 +1,4 @@
-"""Minimal Prometheus metrics for model-admin control plane."""
+"""Minimal Prometheus metrics for control-admin control plane."""
 
 from __future__ import annotations
 

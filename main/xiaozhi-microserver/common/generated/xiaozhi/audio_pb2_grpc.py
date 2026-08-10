@@ -5,7 +5,7 @@ import warnings
 
 from . import audio_pb2 as audio__pb2
 
-GRPC_GENERATED_VERSION = '1.83.0'
+GRPC_GENERATED_VERSION = '1.71.2'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -18,14 +18,14 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + ' but the generated code in audio_pb2_grpc.py depends on'
+        + f' but the generated code in audio_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
     )
 
 
-class AudioPreprocessServiceStub:
+class AudioPreprocessServiceStub(object):
     """Preprocess: uplink audio from access + VAD session control
     """
 
@@ -62,7 +62,7 @@ class AudioPreprocessServiceStub:
                 _registered_method=True)
 
 
-class AudioPreprocessServiceServicer:
+class AudioPreprocessServiceServicer(object):
     """Preprocess: uplink audio from access + VAD session control
     """
 
@@ -132,7 +132,7 @@ def add_AudioPreprocessServiceServicer_to_server(servicer, server):
 
 
  # This class is part of an EXPERIMENTAL API.
-class AudioPreprocessService:
+class AudioPreprocessService(object):
     """Preprocess: uplink audio from access + VAD session control
     """
 
@@ -272,7 +272,7 @@ class AudioPreprocessService:
             _registered_method=True)
 
 
-class AudioReceiverServiceStub:
+class AudioReceiverServiceStub(object):
     """Receiver: ASR
     """
 
@@ -289,7 +289,7 @@ class AudioReceiverServiceStub:
                 _registered_method=True)
 
 
-class AudioReceiverServiceServicer:
+class AudioReceiverServiceServicer(object):
     """Receiver: ASR
     """
 
@@ -315,7 +315,7 @@ def add_AudioReceiverServiceServicer_to_server(servicer, server):
 
 
  # This class is part of an EXPERIMENTAL API.
-class AudioReceiverService:
+class AudioReceiverService(object):
     """Receiver: ASR
     """
 
@@ -347,7 +347,7 @@ class AudioReceiverService:
             _registered_method=True)
 
 
-class AgentServiceStub:
+class AgentServiceStub(object):
     """Agent: dialogue brain (phase-3 LLM / tools / device events)
     """
 
@@ -372,9 +372,14 @@ class AgentServiceStub:
                 request_serializer=audio__pb2.AgentAbortRequest.SerializeToString,
                 response_deserializer=audio__pb2.AgentAbortResponse.FromString,
                 _registered_method=True)
+        self.ApplySessionConfig = channel.unary_unary(
+                '/xiaozhi.audio.AgentService/ApplySessionConfig',
+                request_serializer=audio__pb2.ApplySessionConfigRequest.SerializeToString,
+                response_deserializer=audio__pb2.ApplySessionConfigResponse.FromString,
+                _registered_method=True)
 
 
-class AgentServiceServicer:
+class AgentServiceServicer(object):
     """Agent: dialogue brain (phase-3 LLM / tools / device events)
     """
 
@@ -391,6 +396,12 @@ class AgentServiceServicer:
         raise NotImplementedError('Method not implemented!')
 
     def Abort(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ApplySessionConfig(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -414,6 +425,11 @@ def add_AgentServiceServicer_to_server(servicer, server):
                     request_deserializer=audio__pb2.AgentAbortRequest.FromString,
                     response_serializer=audio__pb2.AgentAbortResponse.SerializeToString,
             ),
+            'ApplySessionConfig': grpc.unary_unary_rpc_method_handler(
+                    servicer.ApplySessionConfig,
+                    request_deserializer=audio__pb2.ApplySessionConfigRequest.FromString,
+                    response_serializer=audio__pb2.ApplySessionConfigResponse.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'xiaozhi.audio.AgentService', rpc_method_handlers)
@@ -422,7 +438,7 @@ def add_AgentServiceServicer_to_server(servicer, server):
 
 
  # This class is part of an EXPERIMENTAL API.
-class AgentService:
+class AgentService(object):
     """Agent: dialogue brain (phase-3 LLM / tools / device events)
     """
 
@@ -507,8 +523,35 @@ class AgentService:
             metadata,
             _registered_method=True)
 
+    @staticmethod
+    def ApplySessionConfig(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/xiaozhi.audio.AgentService/ApplySessionConfig',
+            audio__pb2.ApplySessionConfigRequest.SerializeToString,
+            audio__pb2.ApplySessionConfigResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
 
-class AudioSpeakerServiceStub:
+
+class AudioSpeakerServiceStub(object):
     """Speaker: TTS (phase-4)
     """
 
@@ -535,7 +578,7 @@ class AudioSpeakerServiceStub:
                 _registered_method=True)
 
 
-class AudioSpeakerServiceServicer:
+class AudioSpeakerServiceServicer(object):
     """Speaker: TTS (phase-4)
     """
 
@@ -583,7 +626,7 @@ def add_AudioSpeakerServiceServicer_to_server(servicer, server):
 
 
  # This class is part of an EXPERIMENTAL API.
-class AudioSpeakerService:
+class AudioSpeakerService(object):
     """Speaker: TTS (phase-4)
     """
 
@@ -669,7 +712,7 @@ class AudioSpeakerService:
             _registered_method=True)
 
 
-class AccessAudioServiceStub:
+class AccessAudioServiceStub(object):
     """Access: downstream TTS / device write-back
     """
 
@@ -686,7 +729,7 @@ class AccessAudioServiceStub:
                 _registered_method=True)
 
 
-class AccessAudioServiceServicer:
+class AccessAudioServiceServicer(object):
     """Access: downstream TTS / device write-back
     """
 
@@ -712,7 +755,7 @@ def add_AccessAudioServiceServicer_to_server(servicer, server):
 
 
  # This class is part of an EXPERIMENTAL API.
-class AccessAudioService:
+class AccessAudioService(object):
     """Access: downstream TTS / device write-back
     """
 

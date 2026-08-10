@@ -51,19 +51,38 @@ class SileroVAD(VADProviderBase):
         explicit = self.config.get("model_path")
         if explicit:
             return Path(str(explicit))
-        base = Path(str(model_dir))
-        if not base.is_absolute():
-            # Relative to preprocess service root
-            service_root = Path(__file__).resolve().parents[3]
-            base = (service_root / base).resolve()
-        candidate = base / "src" / "silero_vad" / "data" / "silero_vad.onnx"
-        if candidate.exists():
-            return candidate
-        # Also accept model_dir pointing directly at the onnx file's parent
-        direct = base / "silero_vad.onnx"
-        if direct.exists():
-            return direct
-        return candidate
+
+        service_root = Path(__file__).resolve().parents[3]
+        # microserver/xiaozhi-audio-preprocess → main/xiaozhi-server
+        monolith_models = (
+            service_root.parents[1] / "xiaozhi-server" / "models"
+        ).resolve()
+
+        bases: list[Path] = []
+        raw = Path(str(model_dir)) if model_dir else Path()
+        if raw.is_absolute():
+            bases.append(raw)
+        elif model_dir:
+            bases.append((service_root / raw).resolve())
+            # manager-api ships monolith paths like "models/snakers4_silero-vad"
+            parts = raw.parts
+            if parts and parts[0] == "models":
+                bases.append((monolith_models.joinpath(*parts[1:])).resolve())
+            elif raw.name:
+                bases.append((monolith_models / raw.name).resolve())
+        else:
+            bases.append(monolith_models / "snakers4_silero-vad")
+
+        last_candidate = Path()
+        for base in bases:
+            candidate = base / "src" / "silero_vad" / "data" / "silero_vad.onnx"
+            if candidate.exists():
+                return candidate
+            direct = base / "silero_vad.onnx"
+            if direct.exists():
+                return direct
+            last_candidate = candidate
+        return last_candidate
 
     def _ensure_state(self, state: VadClientState) -> None:
         if not hasattr(state, "_vad_state") or state._vad_state is None:  # type: ignore[attr-defined]

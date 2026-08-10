@@ -13,23 +13,26 @@ for p in (MICRO_ROOT / "common", MICRO_ROOT / "common" / "generated", SERVICE_RO
 import argparse  # noqa: E402
 
 from xiaozhi_common.config import add_common_arguments, config_from_args  # noqa: E402
-from xiaozhi_common.constants import MODEL_ADMIN_HTTP_PORT, MODEL_ADMIN_SERVICE  # noqa: E402
+from xiaozhi_common.constants import (  # noqa: E402
+    CONTROL_ADMIN_HTTP_PORT,
+    CONTROL_ADMIN_SERVICE,
+)
 from xiaozhi_common.logging import setup_logging  # noqa: E402
 
 
 def build_config():
-    parser = argparse.ArgumentParser(description="xiaozhi-model-admin")
+    parser = argparse.ArgumentParser(description="xiaozhi-control-admin")
     add_common_arguments(
         parser,
-        service_name=MODEL_ADMIN_SERVICE,
-        server_name="xiaozhi_model_admin",
+        service_name=CONTROL_ADMIN_SERVICE,
+        server_name="xiaozhi_control_admin",
         default_grpc_port=50056,
     )
-    parser.set_defaults(http_port=MODEL_ADMIN_HTTP_PORT)
+    parser.set_defaults(http_port=CONTROL_ADMIN_HTTP_PORT)
     args, _ = parser.parse_known_args()
     cfg = config_from_args(args)
     if cfg.http_port is None:
-        cfg.http_port = MODEL_ADMIN_HTTP_PORT
+        cfg.http_port = CONTROL_ADMIN_HTTP_PORT
     return cfg
 
 

@@ -2,6 +2,12 @@ server:
   name: xiaozhi-agent
   phase: 3
   environment: development
+  # LLM hang → fallback speech (chat_engine wall-clock)
+  resilience:
+    enabled: true
+    llm_timeout_seconds: 45
+    phrases:
+      llm: "主人，小智现在有点忙，我们稍后再试吧。"
 
 # Prompt identity injected into agent-base-prompt.txt {{base_prompt}}
 prompt: |
@@ -78,3 +84,15 @@ plugins:
 
 tool_call_timeout: 30
 max_tool_depth: 5
+
+# Chat history → RabbitMQ (manager-api consumes). Default off.
+chat_history:
+  report_enabled: true
+rabbitmq:
+  enabled: true
+  host: 127.0.0.1
+  port: 5672
+  username: guest
+  password: guest
+  virtual_host: /
+  queue: xiaozhi.chat.history

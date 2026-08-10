@@ -132,6 +132,19 @@ async def _handle_websocket(pool: GrpcClientPool, websocket: WebSocket) -> None:
     welcome = gateway_runtime.welcome_message(session_id)
     await websocket.send_text(json.dumps(welcome, ensure_ascii=False))
 
+    # Monolith equivalent: get_private_config_from_api → agent LLM/prompt per device.
+    try:
+        from app.ws.device_bind import bind_device_on_connect
+
+        await bind_device_on_connect(
+            pool,
+            device_id=device_id,
+            client_id=client_id,
+            bind_id=bind_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"device bind/agent-models skipped: {exc}")
+
     try:
         while True:
             message = await websocket.receive()

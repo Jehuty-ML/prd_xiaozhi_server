@@ -1,0 +1,3 @@
+# Keep data/ so private .config.yaml has a home; secrets stay untracked.
+*
+!.gitignore

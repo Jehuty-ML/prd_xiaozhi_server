@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import threading
 import uuid
 from typing import Any, List, Optional
 
@@ -16,11 +17,13 @@ from app.providers.llm import LLMProviderBase
 from app.providers.memory import MemoryProviderBase
 from app.tools.handler import ToolHandler
 from app.tools.register import Action, ActionResponse
+from xiaozhi_common.mq import ChatHistoryPublisher
 from xiaozhi_common.resilience import (
     UpstreamError,
     UpstreamKind,
     call_with_resilience,
     get_fallback_text,
+    timeout_for_stage,
 )
 
 _SENTENCE_END = re.compile(r"([。！？!?；;\n])")
@@ -104,7 +107,24 @@ class ChatEngine:
         self.memory = memory
         self.tools = tools
         self.config = config
-        self._loop = asyncio.new_event_loop()
+        self._chat_history = ChatHistoryPublisher.from_config(config)
+        # gRPC workers are multi-threaded; never share one asyncio loop across them.
+        self._async_lock = threading.Lock()
+
+    def _run_async(self, coro):  # noqa: ANN001
+        with self._async_lock:
+            return asyncio.run(coro)
+
+    def _publish_history(self, session: Session, chat_type: int, content: str) -> None:
+        try:
+            self._chat_history.publish(
+                mac_address=session.device_id or session.client_id,
+                session_id=session.session_id,
+                chat_type=chat_type,
+                content=content or "",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"chat history publish skipped: {exc}")
 
     def chat(self, session: Session, query: Optional[str] = None, depth: int = 0) -> str:
         if depth == 0:
@@ -112,6 +132,8 @@ class ChatEngine:
             session.sentence_id = uuid.uuid4().hex
             session._speak_index = 0
             session.dialogue.put(Message(role="user", content=query or ""))
+            if query:
+                self._publish_history(session, 1, query)
 
         max_depth = int(self.config.get("max_tool_depth", 5))
         force_final = depth >= max_depth
@@ -126,7 +148,7 @@ class ChatEngine:
         memory_str = ""
         if query and depth == 0:
             try:
-                memory_str = self._loop.run_until_complete(self.memory.query_memory(query))
+                memory_str = self._run_async(self.memory.query_memory(query))
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"memory query failed: {exc}")
 
@@ -144,8 +166,9 @@ class ChatEngine:
         try:
             def _consume():
                 nonlocal tool_call_flag, content_arguments
+                llm = session.llm or self.llm
                 if functions:
-                    stream = self.llm.response_with_functions(
+                    stream = llm.response_with_functions(
                         session.session_id, dialogue, functions
                     )
                     for content, tools_call in stream:
@@ -160,19 +183,24 @@ class ChatEngine:
                             tool_call_flag = True
                             _merge_tool_calls(tool_calls_list, tools_call)
                 else:
-                    for content in self.llm.response(session.session_id, dialogue):
+                    for content in llm.response(session.session_id, dialogue):
                         if session.client_abort:
                             break
                         if content:
                             response_chunks.append(content)
                             speaker.feed(content)
 
+            active_llm = session.llm or self.llm
+            cfg = session.config or self.config
+            # Wall-clock cap so a hung upstream still yields fallback speech.
+            llm_timeout = timeout_for_stage("llm", cfg)
             call_with_resilience(
                 "llm",
                 _consume,
-                config=self.config,
-                provider=type(self.llm).__name__,
+                config=cfg,
+                provider=type(active_llm).__name__,
                 max_retries=0,
+                timeout_seconds=llm_timeout,
             )
         except UpstreamError as exc:
             logger.warning(f"LLM upstream failed: {exc}")
@@ -182,23 +210,38 @@ class ChatEngine:
                 metrics_mod.observe_degraded("llm", exc.kind.value)
             except Exception:  # noqa: BLE001
                 pass
-            fallback = get_fallback_text(self.config, "llm", exc.kind)
+            # Stop a late stream thread from talking over the fallback.
+            session.mark_abort("llm_upstream")
+            fallback = get_fallback_text(session.config or self.config, "llm", exc.kind)
+            session.reset_abort()
             speaker.feed(fallback)
             speaker.flush()
-            if not session.client_abort:
+            try:
                 session.speak_end()
+            except Exception:  # noqa: BLE001
+                pass
+            session.mark_abort("llm_upstream")
             session.dialogue.put(Message(role="assistant", content=fallback))
+            if depth == 0:
+                self._publish_history(session, 2, fallback)
             return fallback
         except Exception as exc:  # noqa: BLE001
             logger.exception(f"LLM failed: {exc}")
+            session.mark_abort("llm_failed")
             fallback = get_fallback_text(
-                self.config, "llm", UpstreamKind.UNAVAILABLE
+                session.config or self.config, "llm", UpstreamKind.UNAVAILABLE
             )
+            session.reset_abort()
             speaker.feed(fallback)
             speaker.flush()
-            if not session.client_abort:
+            try:
                 session.speak_end()
+            except Exception:  # noqa: BLE001
+                pass
+            session.mark_abort("llm_failed")
             session.dialogue.put(Message(role="assistant", content=fallback))
+            if depth == 0:
+                self._publish_history(session, 2, fallback)
             return fallback
 
         # Text-based <tool_call> fallback
@@ -237,7 +280,7 @@ class ChatEngine:
                 if not tc.get("name"):
                     continue
                 logger.info(f"exec tool {tc['name']} args={tc.get('arguments')}")
-                result = self._loop.run_until_complete(
+                result = self._run_async(
                     self.tools.handle_llm_function_call(session, tc)
                 )
                 tool_results.append((result, tc))
@@ -252,6 +295,8 @@ class ChatEngine:
         text = speaker.full_text or "".join(response_chunks)
         if text:
             session.dialogue.put(Message(role="assistant", content=text))
+            if depth == 0:
+                self._publish_history(session, 2, text)
         return text
 
     def _handle_tool_results(
@@ -312,12 +357,20 @@ class ChatEngine:
                 session.speak_end()
             text = "".join(direct_parts)
             session.dialogue.put(Message(role="assistant", content=text))
+            if depth == 0:
+                self._publish_history(session, 2, text)
             return text
 
         if need_llm:
-            return self.chat(session, query=None, depth=depth + 1)
+            reply = self.chat(session, query=None, depth=depth + 1)
+            if depth == 0 and reply:
+                self._publish_history(session, 2, reply)
+            return reply
 
         speaker.flush()
         if not session.client_abort:
             session.speak_end()
-        return speaker.full_text or ""
+        text = speaker.full_text or ""
+        if depth == 0 and text:
+            self._publish_history(session, 2, text)
+        return text

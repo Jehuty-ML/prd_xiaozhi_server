@@ -109,6 +109,21 @@ message AgentAbortResponse {
   string result = 3;
 }
 
+// Access → agent: per-device private config from manager-api /config/agent-models
+message ApplySessionConfigRequest {
+  string message_id = 1;
+  string client_id = 2;
+  string device_id = 3;
+  string config_json = 4;
+  string reason = 5;
+}
+
+message ApplySessionConfigResponse {
+  int32 code = 1;
+  string msg = 2;
+  string result = 3;
+}
+
 message SpeakerAbortRequest {
   string message_id = 1;
   string client_id = 2;
@@ -196,6 +211,7 @@ service AgentService {
   rpc SendText(TextRequest) returns (TextResponse);
   rpc HandleDeviceEvent(DeviceEventRequest) returns (DeviceEventResponse);
   rpc Abort(AgentAbortRequest) returns (AgentAbortResponse);
+  rpc ApplySessionConfig(ApplySessionConfigRequest) returns (ApplySessionConfigResponse);
 }
 
 // Speaker: TTS (phase-4)

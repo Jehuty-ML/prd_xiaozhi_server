@@ -20,7 +20,7 @@ class BaseServerConfig:
     http_port: Optional[int] = None
     heart_interval: int = 5
     rpc_max_connect: int = 32
-    log_level: str = "INFO"
+    log_level: str = "DEBUG"
     log_file: str = "logs/server.log"
     disable_nacos: bool = False
     peers: dict[str, str] = field(default_factory=dict)
@@ -80,7 +80,7 @@ def add_common_arguments(parser: Any, *, service_name: str, server_name: str, de
     parser.add_argument("--http_port", type=int, default=None)
     parser.add_argument("--heart_interval", type=int, default=5)
     parser.add_argument("--rpc_max_connect", type=int, default=32)
-    parser.add_argument("--log_level", type=str, default="INFO")
+    parser.add_argument("--log_level", type=str, default="DEBUG", help="Console log level")
     parser.add_argument("--log_file", type=str, default="logs/server.log")
     parser.add_argument("--disable_nacos", action="store_true", help="Skip Nacos register/discover")
     parser.add_argument(

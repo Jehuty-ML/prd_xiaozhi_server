@@ -118,7 +118,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--url",
-        default="ws://127.0.0.1:8103/xiaozhi/v1/?device-id=smoke-001",
+        default="ws://127.0.0.1:8000/xiaozhi/v1/?device-id=smoke-001",
     )
     parser.add_argument("--text", default="hello-xiaozhi")
     parser.add_argument("--timeout", type=float, default=20.0)

@@ -1,13 +1,21 @@
+# 模板配置（可提交）。私有密钥请写到 data/.config.yaml，不要改本文件的 secret。
+# 用法对齐单体 xiaozhi-server：
+#   1. 复制 config_from_api.yaml → data/.config.yaml
+#   2. 填入 manager-api.url / secret，并设 enabled: true
+#   3. 重启 xiaozhi-control-admin
+#
+# 合并顺序：config.yaml < data/.config.yaml < manager-api server-base（绑定端口仍以本地为准）
+
 server:
   name: xiaozhi-microserver
   phase: 2
   environment: development
-  # access WS port (OTA websocket.url uses this)
-  port: 8103
-  # model-admin HTTP port
-  http_port: 8004
-  websocket: "ws://127.0.0.1:8103/xiaozhi/v1/"
-  vision_explain: "http://127.0.0.1:8004/mcp/vision/explain"
+  # access WS port（对齐单体 server.port=8000）
+  port: 8000
+  # control-admin HTTP / OTA / vision（对齐单体 server.http_port=8003）
+  http_port: 8003
+  websocket: "ws://127.0.0.1:8000/xiaozhi/v1/"
+  vision_explain: "http://127.0.0.1:8003/mcp/vision/explain"
   auth_key: ""
   timezone_offset: 8
   auth:
@@ -24,7 +32,6 @@ server:
   health:
     liveness_path: /health
     readiness_path: /ready
-  # Phase-6 control-plane gate (auto-on in production)
   admin:
     require_auth: false
     token: ""
@@ -49,21 +56,13 @@ xiaozhi:
     channels: 1
     frame_duration: 60
 
-# Defaults match per-service stubs; real models come from each service yaml
-# or manager-api when enabled. Dual names: Doubao↔DoubaoASR/TTS/LLM, ChatGLM↔ChatGLMLLM.
+# 仅作本地缺省；启用 manager-api 后由智控台 server-base / agent-models 覆盖。
 selected_module:
   ASR: StubASR
   TTS: EchoTTS
   LLM: EchoLLM
 
-# Optional: pull server/agent config from 智控台 manager-api
-# When enabled, url+secret required; dual-name aliases are normalized on merge.
-manager_api:
-  url: ""
-  secret: ""
-  enabled: false
-
-# Alias kept for manage-api client compatibility with monolith key name
+# 占位；真实 url/secret 写到 data/.config.yaml
 manager-api:
   url: ""
   secret: ""

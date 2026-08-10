@@ -25,10 +25,18 @@ class BroadcastSpeakBody(BaseModel):
     exclude_client_id: str = Field(default="")
 
 
+class AgentModelsBody(BaseModel):
+    mac_address: str = Field(default="", alias="macAddress")
+    client_id: str = Field(default="", alias="clientId")
+    selected_module: dict[str, Any] = Field(default_factory=dict, alias="selectedModule")
+
+    model_config = {"populate_by_name": True}
+
+
 def create_http_app(
     store: ConfigStore, pool: Optional[GrpcClientPool] = None
 ) -> FastAPI:
-    app = FastAPI(title="xiaozhi-model-admin", version="0.6.0")
+    app = FastAPI(title="xiaozhi-control-admin", version="0.6.0")
     ota = OtaService(store.get)
     vision = VisionService(store.get)
 
@@ -49,7 +57,7 @@ def create_http_app(
     async def health():
         return {
             "status": "ok",
-            "service": "xiaozhi-model-admin",
+            "service": "xiaozhi-control-admin",
             "phase": 6,
             "environment": resolve_environment(store.get()),
         }
@@ -74,7 +82,7 @@ def create_http_app(
             ready_ok = not at_capacity
         payload = {
             "status": "ready" if ready_ok else "not_ready",
-            "service": "xiaozhi-model-admin",
+            "service": "xiaozhi-control-admin",
             "checks": checks,
         }
         if not ready_ok:
@@ -92,8 +100,11 @@ def create_http_app(
         return Response(content=render_latest(), media_type=CONTENT_TYPE_LATEST)
 
     @app.get("/config")
-    async def get_config(key: str = ""):
-        return store.get(key) if key else store.get()
+    async def get_config(key: str = "", redact: bool = True):
+        # Default redact secrets for HTTP; ops can pass redact=false with auth.
+        if key:
+            return store.get(key)
+        return store.get(redact=redact)
 
     @app.post("/config/reload")
     async def reload_config():
@@ -108,6 +119,49 @@ def create_http_app(
             observe_reload(False)
             return JSONResponse(
                 {"status": "error", "message": str(exc)}, status_code=500
+            )
+
+    @app.post("/config/agent-models")
+    async def agent_models(body: AgentModelsBody):
+        """Proxy device private config (LLM/prompt/TTS…) from manager-api."""
+        from app.core.handler.manage_api_client import (
+            DeviceBindException,
+            DeviceNotFoundException,
+            ManageApiClient,
+        )
+
+        mac = (body.mac_address or "").strip()
+        client_id = (body.client_id or mac).strip()
+        if not mac:
+            return JSONResponse(
+                {"status": "error", "message": "missing macAddress"}, status_code=400
+            )
+        client = ManageApiClient(store.get())
+        if not client.enabled:
+            return JSONResponse(
+                {"status": "error", "message": "manager-api disabled"}, status_code=503
+            )
+        selected = body.selected_module or (store.get().get("selected_module") or {})
+        try:
+            data = await client.get_agent_models(mac, client_id, selected)
+            return {"status": "ok", "data": data or {}}
+        except DeviceBindException as exc:
+            return JSONResponse(
+                {
+                    "status": "need_bind",
+                    "bind_code": exc.bind_code,
+                    "message": str(exc),
+                },
+                status_code=409,
+            )
+        except DeviceNotFoundException as exc:
+            return JSONResponse(
+                {"status": "not_found", "message": str(exc)}, status_code=404
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"agent-models failed mac={mac}: {exc}")
+            return JSONResponse(
+                {"status": "error", "message": str(exc)}, status_code=502
             )
 
     @app.post("/broadcast_speak")
