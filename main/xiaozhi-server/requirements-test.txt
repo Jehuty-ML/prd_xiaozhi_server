@@ -1,3 +1,0 @@
-# 网关门禁单测最小依赖（不含 torch / funasr）
-loguru==0.7.3
-prometheus_client==0.21.1
