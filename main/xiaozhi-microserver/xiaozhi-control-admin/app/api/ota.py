@@ -220,7 +220,10 @@ class OtaService:
                     "firmware": {"version": device_version, "url": ""},
                 }
 
-                mqtt_gateway = server.get("mqtt_gateway")
+                mqtt_gateway = str(server.get("mqtt_gateway") or "").strip()
+                # manager-api 偶发下发字面量 "null"；视为未配置，走 WebSocket 分支
+                if mqtt_gateway.lower() in ("", "null", "none", "undefined"):
+                    mqtt_gateway = ""
                 if mqtt_gateway:
                     group_id = f"GID_{device_model}".replace(":", "_").replace(" ", "_")
                     mac_safe = device_id.replace(":", "_")
