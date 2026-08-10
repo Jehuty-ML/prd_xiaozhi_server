@@ -128,17 +128,20 @@ async def startToChat(conn: "ConnectionHandler", text):
     # 首先进行意图分析，使用实际文本内容
     intent_handled = await handle_user_intent(conn, actual_text)
 
+    # await 之后可能已被切到 play_only（配置热更新/广播），需再校验。
+    # 必须在 intent_handled 早退之前：否则意图路径会绕过 play_only 门禁。
+    if is_play_only_mode(conn):
+        # 意图路径若已播降级话并返回 True，避免重复播报
+        if not intent_handled:
+            conn.logger.bind(tag=TAG).info(
+                "play_only 拒绝 startToChat（await 后复核），播报降级话术"
+            )
+            speak_play_only_denied(conn)
+        return False
+
     if intent_handled:
         # 如果意图已被处理，不再进行聊天
         return True
-
-    # await 之后可能已被切到 play_only（配置热更新/广播），需再校验
-    if is_play_only_mode(conn):
-        conn.logger.bind(tag=TAG).info(
-            "play_only 拒绝 startToChat（await 后复核），播报降级话术"
-        )
-        speak_play_only_denied(conn)
-        return False
 
     # 意图未被处理，继续常规聊天流程，使用实际文本内容
     if not conn.transition_session(SessionEvent.CHAT_START, detail="start_to_chat"):
