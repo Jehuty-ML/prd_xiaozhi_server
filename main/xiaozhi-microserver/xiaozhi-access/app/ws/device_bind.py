@@ -148,12 +148,44 @@ def push_peer_provider_config_sync(
     kinds: tuple[str, ...],
     reason: str = "agent_models",
 ) -> bool:
-    """Push ASR/TTS/VAD slices from agent-models onto the owning microservice."""
+    """Push ASR/TTS/VAD slices from agent-models onto the owning microservice.
+
+    Skips pushes whose selected provider has empty/placeholder credentials so a
+    single device connect cannot wipe admin-filled keys and silence the fleet.
+    """
+    from xiaozhi_common.provider_aliases import (
+        SECRET_CREDENTIAL_KEYS,
+        credential_score,
+        is_placeholder_credential,
+        resolve_block,
+    )
+
     payload = _slice_provider_config(private_config, *kinds)
     if not payload.get("selected_module") and not any(
         isinstance(payload.get(k), dict) for k in kinds
     ):
         return False
+    for kind in kinds:
+        selected = (payload.get("selected_module") or {}).get(kind) or ""
+        if not selected:
+            continue
+        _name, _key, block = resolve_block(payload, kind, selected)
+        # Local/stub providers often have no secret keys — allow those.
+        # Cloud providers that *declare* secret fields must carry real values;
+        # otherwise skip so we do not wipe admin-filled fleet credentials.
+        declared = [k for k in SECRET_CREDENTIAL_KEYS if k in (block or {})]
+        if declared and all(is_placeholder_credential(block.get(k)) for k in declared):
+            logger.warning(
+                f"Skip ApplyConfig to {service_name}: {kind}={selected} "
+                f"has empty/placeholder credentials (reason={reason})"
+            )
+            return False
+        if declared and credential_score(block) < 10:
+            logger.warning(
+                f"Skip ApplyConfig to {service_name}: {kind}={selected} "
+                f"credentials unusable (reason={reason})"
+            )
+            return False
     message_id = uuid.uuid4().hex
     try:
         stub = admin_pb2_grpc.ConfigApplyServiceStub(pool.channel(service_name))

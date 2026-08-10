@@ -145,11 +145,18 @@ class Session:
             timeout=30,
         )
         if int(getattr(resp, "code", 0) or 0) == 2:
-            # Speaker owns a broadcast lease; stop injecting dialogue TTS.
-            self.mark_abort("blocked_by_broadcast")
-            logger.info(
-                f"Session.speak blocked by broadcast client={self.client_id}"
-            )
+            msg = str(getattr(resp, "msg", "") or "")
+            # Only broadcast lease is a hard abort; illegal_state may recover after
+            # barge-in re-enters THINKING — do not mislabel as broadcast.
+            if msg == "blocked_by_broadcast":
+                self.mark_abort("blocked_by_broadcast")
+                logger.info(
+                    f"Session.speak blocked by broadcast client={self.client_id}"
+                )
+            else:
+                logger.warning(
+                    f"Session.speak rejected client={self.client_id} msg={msg}"
+                )
             return
         logger.debug(f"Session.speak client={self.client_id} idx={index} text={text!r}")
 
@@ -174,7 +181,13 @@ class Session:
             timeout=10,
         )
         if int(getattr(resp, "code", 0) or 0) == 2:
-            self.mark_abort("blocked_by_broadcast")
+            msg = str(getattr(resp, "msg", "") or "")
+            if msg == "blocked_by_broadcast":
+                self.mark_abort("blocked_by_broadcast")
+            else:
+                logger.warning(
+                    f"Session.speak_end rejected client={self.client_id} msg={msg}"
+                )
             return
         logger.debug(f"Session.speak_end client={self.client_id} idx={index}")
 

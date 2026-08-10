@@ -113,9 +113,20 @@ def test_peer_gates():
     assert can_start_think(SessionState.SPEAKING)  # barge-in allowed
     assert can_start_play(SessionState.THINKING)
     assert can_start_listen(SessionState.IDLE)
+    assert not can_start_listen(SessionState.THINKING)
+    assert not can_start_listen(SessionState.SPEAKING)
     assert parse_session_state("listening") == SessionState.LISTENING
     assert parse_session_state("THINKING") == SessionState.THINKING
     assert parse_session_state("aborted") == SessionState.IDLE
+
+
+def test_thinking_cannot_listen_without_abort():
+    from xiaozhi_common.session import SessionEvent, SessionState, SessionStateMachine
+
+    sm = SessionStateMachine(session_id="t1")
+    assert sm.transition(SessionEvent.CHAT_START)
+    assert sm.state == SessionState.THINKING
+    assert not sm.transition(SessionEvent.LISTEN_START)
 
 def test_access_device_session_store():
     """Import access store with path pin."""

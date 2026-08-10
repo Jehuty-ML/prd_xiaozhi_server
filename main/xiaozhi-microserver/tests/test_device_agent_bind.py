@@ -147,6 +147,10 @@ def test_slice_provider_config_for_receiver():
     agent = str(AGENT_ROOT.resolve())
     if agent in sys.path:
         sys.path.remove(agent)
+    access = str(ACCESS_ROOT.resolve())
+    if access in sys.path:
+        sys.path.remove(access)
+    sys.path.insert(0, access)
     for key in list(sys.modules):
         if key == "app" or key.startswith("app."):
             del sys.modules[key]
@@ -173,3 +177,83 @@ def test_slice_provider_config_for_receiver():
     assert "ASR_DoubaoASR" in sliced["ASR"]
     assert "TTS" not in sliced
     assert "LLM" not in sliced
+
+
+def test_push_peer_skips_placeholder_asr_credentials():
+    _ensure_paths(COMMON, GENERATED, ACCESS_ROOT)
+    agent = str(AGENT_ROOT.resolve())
+    if agent in sys.path:
+        sys.path.remove(agent)
+    access = str(ACCESS_ROOT.resolve())
+    if access in sys.path:
+        sys.path.remove(access)
+    sys.path.insert(0, access)
+    for key in list(sys.modules):
+        if key == "app" or key.startswith("app."):
+            del sys.modules[key]
+    from app.ws.device_bind import push_peer_provider_config_sync
+
+    private = {
+        "selected_module": {"ASR": "DoubaoASR"},
+        "ASR": {
+            "DoubaoASR": {
+                "type": "doubao",
+                "appid": "你的appid",
+                "access_token": "你的token",
+            }
+        },
+    }
+    pool = MagicMock()
+    assert (
+        push_peer_provider_config_sync(
+            pool,
+            service_name="xiaozhi-audio-receiver",
+            private_config=private,
+            kinds=("ASR",),
+            reason="test",
+        )
+        is False
+    )
+    pool.channel.assert_not_called()
+
+
+def test_apply_remote_preserves_prior_secrets():
+    _ensure_paths(COMMON)
+    from xiaozhi_common.runtime_config import ServiceRuntimeConfig
+
+    cfg = ServiceRuntimeConfig.__new__(ServiceRuntimeConfig)
+    cfg.service_root = Path(".")
+    cfg.log_label = "Test"
+    cfg.selected_kind = "ASR"
+    cfg.path = Path("config.yaml")
+    cfg.private_path = Path("data/.config.yaml")
+    cfg._local = {
+        "selected_module": {"ASR": "Doubao"},
+        "ASR": {"Doubao": {"type": "doubao", "appid": "", "access_token": ""}},
+    }
+    cfg.data = {
+        "selected_module": {"ASR": "Doubao"},
+        "ASR": {
+            "Doubao": {
+                "type": "doubao",
+                "appid": "real-app",
+                "access_token": "real-token",
+            }
+        },
+    }
+    cfg.apply_remote(
+        {
+            "selected_module": {"ASR": "Doubao"},
+            "ASR": {
+                "Doubao": {
+                    "type": "doubao",
+                    "appid": "你的appid",
+                    "access_token": "",
+                }
+            },
+        },
+        reason="device_bind",
+    )
+    block = cfg.data["ASR"]["Doubao"]
+    assert block["appid"] == "real-app"
+    assert block["access_token"] == "real-token"

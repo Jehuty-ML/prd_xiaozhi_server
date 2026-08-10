@@ -111,6 +111,13 @@ class SpeakSession:
         with self._lock:
             return bool(self._broadcast_message_id)
 
+    def has_active_turn(self) -> bool:
+        """True when audio is draining or jobs are still queued for this client."""
+        with self._lock:
+            if self._turn_started:
+                return True
+        return not self._q.empty()
+
     def _should_abort(self) -> bool:
         return self._abort
 
@@ -247,6 +254,10 @@ class SpeakSessionStore:
             return False
         sess.abort(reason)
         return True
+
+    def get(self, client_id: str) -> Optional[SpeakSession]:
+        with self._lock:
+            return self._sessions.get(client_id)
 
     def speak_text(
         self,

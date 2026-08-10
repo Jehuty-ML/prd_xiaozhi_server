@@ -84,6 +84,14 @@ def _is_placeholder(value: Any) -> bool:
     return "你的" in text or "placeholder" in lowered or text in {"***", "xxxx", "XXXX"}
 
 
+def is_placeholder_credential(value: Any) -> bool:
+    """True for empty / template credentials that must not overwrite real secrets."""
+    return _is_placeholder(value)
+
+
+SECRET_CREDENTIAL_KEYS = _SECRET_KEYS
+
+
 def credential_score(block: dict[str, Any] | None) -> int:
     """Higher = more usable credentials (prefer manager-api filled blocks)."""
     if not isinstance(block, dict) or not block:

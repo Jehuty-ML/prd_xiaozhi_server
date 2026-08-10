@@ -47,13 +47,30 @@ class AccessAudioServicer(audio_pb2_grpc.AccessAudioServiceServicer):
                 client_id, json.dumps(frame, ensure_ascii=False)
             )
             if state in ("start", "sentence_start"):
+                # Bind this downlink turn so a late stop from a prior message
+                # cannot TTS_END the next chat/speak cycle.
+                mid = (request.message_id or "").strip()
+                if mid:
+                    connection_manager.set_meta(client_id, "tts_message_id", mid)
                 connection_manager.transition(
                     client_id, SessionEvent.TTS_START, detail=f"tts_{state}"
                 )
             elif state == "stop":
-                connection_manager.transition(
-                    client_id, SessionEvent.TTS_END, detail="tts_stop"
+                mid = (request.message_id or "").strip()
+                active = str(
+                    connection_manager.get_meta(client_id).get("tts_message_id") or ""
                 )
+                if mid and active and mid != active:
+                    logger.info(
+                        f"Access TTS stop ignored stale mid={mid} active={active} "
+                        f"client_id={client_id}"
+                    )
+                else:
+                    connection_manager.transition(
+                        client_id, SessionEvent.TTS_END, detail="tts_stop"
+                    )
+                    if mid and active == mid:
+                        connection_manager.set_meta(client_id, "tts_message_id", "")
             logger.info(
                 f"Access TTS state={state} client_id={client_id} text={text!r}"
             )

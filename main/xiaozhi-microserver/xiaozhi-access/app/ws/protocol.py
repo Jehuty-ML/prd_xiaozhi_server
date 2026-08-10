@@ -158,6 +158,11 @@ async def _handle_listen(
     aec_enabled = bool(meta.get("aec_enabled"))
 
     if state == "start":
+        current = str(connection_manager.get_state(client_id) or "").upper()
+        if current in ("SPEAKING", "THINKING"):
+            # Cancel LLM/TTS before listen; else SpeakText hits LISTENING gate.
+            connection_manager.set_state(client_id, "abort")
+            await _abort_peers(pool, client_id, reason="listen_barge_in")
         connection_manager.set_state(client_id, "listen_start")
         await _control_listen(
             pool,
@@ -178,6 +183,10 @@ async def _handle_listen(
         )
         return
     if state == "detect":
+        current = str(connection_manager.get_state(client_id) or "").upper()
+        if current in ("SPEAKING", "THINKING"):
+            connection_manager.set_state(client_id, "abort")
+            await _abort_peers(pool, client_id, reason="detect_barge_in")
         connection_manager.set_state(client_id, "detect")
         content = payload.get("text") or payload.get("data") or ""
         if content:
@@ -237,27 +246,13 @@ async def _control_listen(
         if state == "detect" and text:
             await _inject_text(pool, client_id, text)
 
-async def _handle_abort(
+async def _abort_peers(
     pool: GrpcClientPool,
-    websocket: WebSocket,
     client_id: str,
-    session_id: str,
-    payload: dict[str, Any],
+    *,
+    reason: str = "barge_in",
 ) -> None:
-    reason = payload.get("reason") or "client_abort"
-    connection_manager.set_state(client_id, "abort")
-    await websocket.send_text(
-        json.dumps(
-            {
-                "type": "tts",
-                "state": "stop",
-                "session_id": session_id,
-                "reason": reason,
-            },
-            ensure_ascii=False,
-        )
-    )
-    # Fan-out abort to agent (cancel chat) + speaker (drain TTS) + preprocess (VAD)
+    """Fan-out abort to agent + speaker + preprocess (cancel in-flight turn)."""
     message_id = uuid.uuid4().hex
 
     def _abort_agent():
@@ -304,6 +299,29 @@ async def _handle_abort(
         await asyncio.to_thread(_abort_preprocess)
     except Exception as exc:  # noqa: BLE001
         logger.debug(f"Preprocess abort fan-out skipped: {exc}")
+
+
+async def _handle_abort(
+    pool: GrpcClientPool,
+    websocket: WebSocket,
+    client_id: str,
+    session_id: str,
+    payload: dict[str, Any],
+) -> None:
+    reason = payload.get("reason") or "client_abort"
+    connection_manager.set_state(client_id, "abort")
+    await websocket.send_text(
+        json.dumps(
+            {
+                "type": "tts",
+                "state": "stop",
+                "session_id": session_id,
+                "reason": reason,
+            },
+            ensure_ascii=False,
+        )
+    )
+    await _abort_peers(pool, client_id, reason=str(reason))
     logger.info(f"WS abort client_id={client_id} session={session_id} reason={reason}")
 
 

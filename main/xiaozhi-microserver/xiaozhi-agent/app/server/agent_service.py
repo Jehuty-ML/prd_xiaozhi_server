@@ -131,11 +131,17 @@ class AgentServicer(audio_pb2_grpc.AgentServiceServicer):
                 send_state_command,
             )
 
-            # Barge-in: previous turn left SPEAKING/THINKING → abort then chat.
+            # Barge-in: abort in-flight TTS/LLM before a new chat turn.
+            # Include DETECT: wake-word path may have left SPEAKING→DETECT without
+            # stopping the speaker; skipping abort causes overlapping audio + FSM clobber.
             state = fetch_device_state(
                 self.pool, client_id, message_id=request.message_id or ""
             )
-            if state in (SessionState.SPEAKING, SessionState.THINKING):
+            if state in (
+                SessionState.SPEAKING,
+                SessionState.THINKING,
+                SessionState.DETECT,
+            ):
                 logger.info(
                     f"Agent SendText barge-in client={client_id} from={state}"
                 )

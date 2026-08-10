@@ -31,10 +31,11 @@ class AudioPreprocessServicer(audio_pb2_grpc.AudioPreprocessServiceServicer):
 
         if command == "listen_start":
             if not gate_start_listen(self.pool, client_id, message_id=message_id):
-                # Stuck in THINKING etc. — abort then retry so VAD end can proceed
+                # SPEAKING/THINKING — abort peers + FSM, then retry listen.
                 logger.info(
                     f"preprocess listen_start denied, barge-in abort client={client_id}"
                 )
+                self._abort_peers(client_id, message_id, "barge_in")
                 send_state_command(
                     self.pool, client_id, "abort", message_id=message_id
                 )
