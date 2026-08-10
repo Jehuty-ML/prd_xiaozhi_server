@@ -22,6 +22,7 @@ import javax.crypto.spec.SecretKeySpec;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.aop.framework.AopContext;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -39,7 +40,6 @@ import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import jakarta.servlet.http.HttpServletRequest;
-import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import xiaozhi.common.constant.Constant;
 import xiaozhi.common.exception.ErrorCode;
@@ -66,12 +66,12 @@ import xiaozhi.modules.device.service.DialogueServerRegistry;
 import xiaozhi.modules.device.service.OtaService;
 import xiaozhi.modules.device.vo.UserShowDeviceListVO;
 import xiaozhi.modules.security.user.SecurityUser;
+import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.sys.service.SysParamsService;
 import xiaozhi.modules.sys.service.SysUserUtilService;
 
 @Slf4j
 @Service
-@AllArgsConstructor
 public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> implements DeviceService {
 
     private final DeviceDao deviceDao;
@@ -81,6 +81,26 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
     private final OtaService otaService;
     private final DeviceAddressBookService deviceAddressBookService;
     private final DialogueServerRegistry dialogueServerRegistry;
+    private final AgentService agentService;
+
+    public DeviceServiceImpl(
+            DeviceDao deviceDao,
+            SysUserUtilService sysUserUtilService,
+            SysParamsService sysParamsService,
+            RedisUtils redisUtils,
+            OtaService otaService,
+            DeviceAddressBookService deviceAddressBookService,
+            DialogueServerRegistry dialogueServerRegistry,
+            @Lazy AgentService agentService) {
+        this.deviceDao = deviceDao;
+        this.sysUserUtilService = sysUserUtilService;
+        this.sysParamsService = sysParamsService;
+        this.redisUtils = redisUtils;
+        this.otaService = otaService;
+        this.deviceAddressBookService = deviceAddressBookService;
+        this.dialogueServerRegistry = dialogueServerRegistry;
+        this.agentService = agentService;
+    }
 
     @Async
     public void updateDeviceConnectionInfo(String agentId, String deviceId, String appVersion) {
@@ -132,6 +152,9 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         UserDetail user = SecurityUser.getUser();
         if (user.getId() == null) {
             throw new RenException(ErrorCode.USER_NOT_LOGIN);
+        }
+        if (!agentService.checkAgentPermission(agentId, user.getId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
         }
 
         Date currentTime = new Date();
@@ -569,6 +592,12 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
 
     @Override
     public void manualAddDevice(Long userId, DeviceManualAddDTO dto) {
+        if (userId == null) {
+            throw new RenException(ErrorCode.USER_NOT_LOGIN);
+        }
+        if (!agentService.checkAgentPermission(dto.getAgentId(), userId)) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
         // 检查mac是否已存在
         QueryWrapper<DeviceEntity> wrapper = new QueryWrapper<>();
         wrapper.eq("mac_address", dto.getMacAddress());

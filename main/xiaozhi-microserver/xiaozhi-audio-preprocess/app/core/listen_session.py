@@ -120,6 +120,17 @@ class ListenSessionStore:
         logger.info(f"ListenSession abort client={client_id} reason={reason}")
         return True
 
+    def remove(self, client_id: str) -> bool:
+        with self._lock:
+            sess = self._sessions.pop(client_id, None)
+        if not sess:
+            return False
+        if self.vad:
+            self.vad.release(sess)
+        sess.reset_audio_states()
+        sess.aec.clear()
+        return True
+
     def control_listen(
         self,
         client_id: str,

@@ -59,9 +59,20 @@ class ConnectionManager:
             self._meta[client_id] = meta
             if session_id:
                 self._session_by_client[client_id] = session_id
+            # Primary id must never remain as someone else's alias key.
+            self._aliases.pop(client_id, None)
             if alias_id and alias_id != client_id:
-                self._aliases[alias_id] = client_id
-                meta["client_id"] = alias_id
+                # Refuse alias that collides with a live primary connection —
+                # otherwise after that primary disconnects, traffic for its id
+                # is routed to this socket (wrong-device audio/commands).
+                if alias_id in self._by_client:
+                    logger.warning(
+                        f"WS skip alias={alias_id} — live primary exists "
+                        f"(bound client={client_id})"
+                    )
+                else:
+                    self._aliases[alias_id] = client_id
+                    meta["client_id"] = alias_id
         device_session_store.ensure(client_id, session_id=session_id or client_id)
         device_session_store.transition(
             client_id, SessionEvent.RESET, detail="bind"
@@ -89,6 +100,9 @@ class ConnectionManager:
             self._states.pop(client_id, None)
             self._meta.pop(client_id, None)
             self._session_by_client.pop(client_id, None)
+            # Drop aliases owned by this primary AND any alias keyed as this id
+            # (stale client-id→other mapping that would hijack routing).
+            self._aliases.pop(client_id, None)
             stale_aliases = [a for a, p in self._aliases.items() if p == client_id]
             for a in stale_aliases:
                 self._aliases.pop(a, None)

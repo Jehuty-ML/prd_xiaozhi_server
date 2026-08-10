@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from collections import deque
 from pathlib import Path
@@ -38,6 +39,8 @@ class SileroVAD(VADProviderBase):
         self.session = onnxruntime.InferenceSession(
             str(model_path), providers=["CPUExecutionProvider"], sess_options=opts
         )
+        # ONNX Runtime InferenceSession is not safe for concurrent Run calls.
+        self._infer_lock = threading.Lock()
         self.vad_threshold = float(self.config.get("threshold") or 0.5)
         self.vad_threshold_low = float(self.config.get("threshold_low") or 0.2)
         self.silence_threshold_ms = int(
@@ -119,7 +122,8 @@ class SileroVAD(VADProviderBase):
                     "state": state._vad_state,  # type: ignore[attr-defined]
                     "sr": np.array(16000, dtype=np.int64),
                 }
-                out, new_state = self.session.run(None, ort_inputs)
+                with self._infer_lock:
+                    out, new_state = self.session.run(None, ort_inputs)
                 state._vad_state = new_state  # type: ignore[attr-defined]
                 state._vad_context = audio_input[:, -64:]  # type: ignore[attr-defined]
                 speech_prob = float(out.item())

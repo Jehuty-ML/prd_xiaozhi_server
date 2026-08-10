@@ -315,5 +315,11 @@ class SessionStore:
         session.mark_abort(reason)
         return True
 
+    def remove(self, client_id: str) -> bool:
+        with self._lock:
+            gone = self._sessions.pop(client_id, None) is not None
+            self._chat_locks.pop(client_id, None)
+        return gone
+
 
 session_store = SessionStore()

@@ -102,6 +102,11 @@ class SpeakSession:
         )
         logger.info(f"SpeakSession abort client={self.client_id} reason={reason}")
 
+    def shutdown(self) -> None:
+        """Abort and stop the daemon worker thread (disconnect cleanup)."""
+        self.abort("shutdown")
+        self._q.put(None)
+
     def clear_broadcast(self, message_id: str = "") -> None:
         with self._lock:
             if not message_id or self._broadcast_message_id == message_id:
@@ -280,6 +285,16 @@ class SpeakSessionStore:
         if not sess:
             return False
         sess.abort(reason)
+        return True
+
+    def discard(self, client_id: str, reason: str = "disconnect") -> bool:
+        """Abort and drop the per-client worker (prevents thread leak on churn)."""
+        with self._lock:
+            sess = self._sessions.pop(client_id, None)
+        if not sess:
+            return False
+        sess.shutdown()
+        logger.info(f"SpeakSession discarded client={client_id} reason={reason}")
         return True
 
     def get(self, client_id: str) -> Optional[SpeakSession]:

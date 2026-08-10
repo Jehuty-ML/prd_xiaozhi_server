@@ -265,7 +265,10 @@ class AudioPreprocessServicer(audio_pb2_grpc.AudioPreprocessServiceServicer):
     def Abort(self, request, context):  # noqa: N802, ANN001
         client_id = request.client_id or getattr(context, "client_id", "")
         reason = request.reason or "abort"
-        ok = session_store.abort(client_id, reason) if client_id else False
+        if reason in ("disconnect", "unbind", "shutdown"):
+            ok = session_store.remove(client_id) if client_id else False
+        else:
+            ok = session_store.abort(client_id, reason) if client_id else False
         logger.info(f"Preprocess Abort client={client_id} reason={reason} ok={ok}")
         return audio_pb2.PreprocessAbortResponse(
             code=0, msg="ok", result="aborted" if ok else "no_session"
