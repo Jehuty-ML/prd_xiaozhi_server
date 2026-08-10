@@ -170,6 +170,15 @@ def is_play_only_mode(conn_or_mode: Any) -> bool:
     )
 
 
+def should_block_user_dialogue_tts(conn: object) -> bool:
+    """play_only 或管理台广播（含软打断窗口）期间禁止用户对话抢写/注入 TTS。"""
+    return (
+        is_play_only_mode(conn)
+        or getattr(conn, "_broadcast_speak_active", False)
+        or getattr(conn, "_broadcast_soft_barge_in", False)
+    )
+
+
 def get_play_only_deny_text(config: Optional[Dict[str, Any]] = None) -> str:
     cfg = config or {}
     block = cfg.get("session_state") if isinstance(cfg.get("session_state"), dict) else {}
@@ -717,7 +726,7 @@ async def speak_broadcast_text(conn: object, text: str) -> bool:
 
         from core.handle.intentHandler import speak_txt
 
-        speak_txt(conn, content)
+        speak_txt(conn, content, allow_during_broadcast=True)
         return True
     except Exception as e:
         _finish_broadcast_speak(conn, detail="speak_failed")
