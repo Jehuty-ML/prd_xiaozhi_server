@@ -83,20 +83,25 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 ### 切换真实 LLM
 
-编辑 `xiaozhi-agent/config.yaml`：
+编辑 `xiaozhi-agent/config.yaml`（短名与单体长名均可）：
 
 ```yaml
 selected_module:
-  LLM: OpenAICompatLLM
+  LLM: ChatGLM          # 或 ChatGLMLLM / Doubao / DoubaoLLM / OpenAICompatLLM
 LLM:
-  OpenAICompatLLM:
+  ChatGLM:
     type: openai
     model_name: glm-4-flash
     url: https://open.bigmodel.cn/api/paas/v4/
     api_key: "你的key"
+  Doubao:
+    type: openai
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+    model_name: doubao-1-5-pro-32k-250115
+    api_key: "你的key"
 ```
 
-重启 `xiaozhi-agent` 即可。
+重启 `xiaozhi-agent` 即可。`DoubaoLLM` / `ChatGLMLLM` 为兼容别名（manager-api 下发常用）。
 
 ### 切换真实 TTS（Edge）
 
@@ -112,6 +117,22 @@ TTS:
 ```
 
 重启 `xiaozhi-audio-speaker`。需本机可访问 Edge TTS，并已安装 `edge-tts` / `pydub` / `opuslib_next`（见 `requirements.txt`；解码 mp3 通常还需 ffmpeg）。
+
+### 切换真实 TTS（Doubao）
+
+```yaml
+selected_module:
+  TTS: Doubao           # 或 DoubaoTTS
+TTS:
+  Doubao:
+    type: doubao
+    api_url: https://openspeech.bytedance.com/api/v1/tts
+    voice: BV001_streaming
+    authorization: "Bearer;"
+    appid: "你的appid"
+    access_token: "你的token"
+    cluster: volcano_tts
+```
 
 ### 切换真实 VAD（Silero）
 
@@ -133,11 +154,29 @@ VAD:
 
 重启 `xiaozhi-audio-preprocess`。模型缺失时会自动回退 `StubVAD`。
 
-### 切换真实 ASR（OpenAI 兼容）
-
-编辑 `xiaozhi-audio-receiver/config.yaml`：
+### 切换真实 ASR（FunASR / Doubao / OpenAI）
 
 ```yaml
+# FunASR（需: pip install -r requirements-funasr.txt + SenseVoice 模型目录）
+selected_module:
+  ASR: FunASR
+ASR:
+  FunASR:
+    type: fun_local
+    model_dir: ../../xiaozhi-server/models/SenseVoiceSmall
+    language: auto
+
+# Doubao（短名 Doubao 与 DoubaoASR 等价）
+selected_module:
+  ASR: Doubao
+ASR:
+  Doubao:
+    type: doubao
+    appid: "你的appid"
+    access_token: "你的token"
+    cluster: volcengine_input_common
+
+# OpenAI 兼容 Whisper
 selected_module:
   ASR: OpenAICompatASR
 ASR:
@@ -151,6 +190,25 @@ ASR:
 
 重启 `xiaozhi-audio-receiver`。
 
+### Doubao 三件套（端到端）
+
+| 服务 | `selected_module` | 兼容名 |
+|------|-------------------|--------|
+| receiver | `ASR: Doubao` | `DoubaoASR` |
+| agent | `LLM: Doubao` | `DoubaoLLM` |
+| speaker | `TTS: Doubao` | `DoubaoTTS` |
+
+启用智控台时，在 model-admin 设 `manager_api.enabled: true` 并填 `url`/`secret`；下发的 `DoubaoASR` 等长名会在合并时镜像为短名（见 `xiaozhi_common.provider_aliases`）。
+
+### C 默认栈（对齐单体常用组合）
+
+| 能力 | 配置 |
+|------|------|
+| VAD | `SileroVAD` |
+| ASR | `FunASR` |
+| LLM | `ChatGLM` / `ChatGLMLLM` |
+| TTS | `EdgeTTS` |
+| Memory / Intent | `nomem` / `function_call` |
 ### 手动探活
 
 - Access health / ready / metrics: `http://127.0.0.1:8103/health` 、`/ready` 、`/metrics`
@@ -250,4 +308,6 @@ xiaozhi-microserver/
   xiaozhi-audio-speaker/
   xiaozhi-model-admin/
   scripts/…  tests/test_*_phase*.py  tests/test_phase6_resilience.py
+  tests/test_provider_align.py
+  requirements-funasr.txt   # optional FunASR/torch
 ```

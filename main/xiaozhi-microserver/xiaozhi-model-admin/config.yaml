@@ -49,11 +49,15 @@ xiaozhi:
     channels: 1
     frame_duration: 60
 
+# Defaults match per-service stubs; real models come from each service yaml
+# or manager-api when enabled. Dual names: Doubao↔DoubaoASR/TTS/LLM, ChatGLM↔ChatGLMLLM.
 selected_module:
   ASR: StubASR
-  TTS: StubTTS
-  LLM: StubLLM
+  TTS: EchoTTS
+  LLM: EchoLLM
 
+# Optional: pull server/agent config from 智控台 manager-api
+# When enabled, url+secret required; dual-name aliases are normalized on merge.
 manager_api:
   url: ""
   secret: ""

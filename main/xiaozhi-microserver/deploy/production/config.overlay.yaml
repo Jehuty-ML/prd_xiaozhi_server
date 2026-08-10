@@ -41,3 +41,14 @@ server:
 
 # 可选：固定 auth_key（生产建议随机长串；同时可用作 admin token）
 # server.auth_key: "replace-with-long-random-secret"
+
+# 可选：对接智控台 manager-api（拉取配置 / 热更新）
+# 模型名兼容单体：DoubaoASR/DoubaoTTS/DoubaoLLM（与短名 Doubao 等价）
+# manager_api:
+#   enabled: true
+#   url: "http://manager-api:8002/xiaozhi"
+#   secret: "replace-with-manager-api-secret"
+# manager-api:
+#   enabled: true
+#   url: "http://manager-api:8002/xiaozhi"
+#   secret: "replace-with-manager-api-secret"

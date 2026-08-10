@@ -11,10 +11,14 @@ language: 中文
 
 selected_module:
   LLM: EchoLLM
+  # LLM: Doubao
+  # LLM: DoubaoLLM   # alias
+  # LLM: ChatGLM
+  # LLM: ChatGLMLLM  # alias
   Intent: function_call
   Memory: nomem
 
-# EchoLLM: no external key; OpenAICompatLLM needs api_key
+# EchoLLM: no external key; openai-type needs api_key
 LLM:
   EchoLLM:
     type: echo
@@ -22,6 +26,34 @@ LLM:
     type: openai
     model_name: glm-4-flash
     url: https://open.bigmodel.cn/api/paas/v4/
+    api_key: ""
+    temperature: 0.7
+    max_tokens: 500
+  Doubao:
+    type: openai
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+    model_name: doubao-1-5-pro-32k-250115
+    api_key: ""
+    temperature: 0.7
+    max_tokens: 500
+  DoubaoLLM:
+    type: openai
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+    model_name: doubao-1-5-pro-32k-250115
+    api_key: ""
+    temperature: 0.7
+    max_tokens: 500
+  ChatGLM:
+    type: openai
+    url: https://open.bigmodel.cn/api/paas/v4/
+    model_name: glm-4-flash
+    api_key: ""
+    temperature: 0.7
+    max_tokens: 500
+  ChatGLMLLM:
+    type: openai
+    url: https://open.bigmodel.cn/api/paas/v4/
+    model_name: glm-4-flash
     api_key: ""
     temperature: 0.7
     max_tokens: 500

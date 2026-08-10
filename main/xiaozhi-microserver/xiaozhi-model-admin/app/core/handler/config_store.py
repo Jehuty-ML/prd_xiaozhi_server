@@ -15,6 +15,13 @@ from xiaozhi_common.grpc.client import GrpcClientPool
 from xiaozhi import admin_pb2, admin_pb2_grpc
 from app.core.handler.manage_api_client import ManageApiClient
 
+try:
+    from xiaozhi_common.provider_aliases import mirror_provider_aliases
+except ImportError:  # pragma: no cover
+
+    def mirror_provider_aliases(config: dict) -> dict:  # type: ignore
+        return config
+
 
 def deep_merge(base: dict, overlay: dict) -> dict:
     merged = dict(base)
@@ -135,7 +142,8 @@ def merge_api_config(
         config_data["xiaozhi"] = local_config["xiaozhi"]
     if not config_data.get("prompt_template") and local_config.get("prompt_template"):
         config_data["prompt_template"] = local_config["prompt_template"]
-    return config_data
+    # Dual-name: Doubao ↔ DoubaoASR/TTS/LLM, ChatGLM ↔ ChatGLMLLM, Stub* → Echo*
+    return mirror_provider_aliases(config_data)
 
 
 class ConfigStore:
@@ -170,8 +178,8 @@ class ConfigStore:
             },
             "selected_module": {
                 "ASR": "StubASR",
-                "TTS": "StubTTS",
-                "LLM": "StubLLM",
+                "TTS": "EchoTTS",
+                "LLM": "EchoLLM",
             },
             "xiaozhi": {
                 "type": "hello",
@@ -247,6 +255,9 @@ class ConfigStore:
                         logger.info("Config merged from manager-api")
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(f"manager-api pull failed: {exc}")
+            else:
+                # Local-only path: still mirror Doubao*/ChatGLM* dual names
+                self._data = mirror_provider_aliases(self._data)
 
             snapshot = copy.deepcopy(self._data)
 

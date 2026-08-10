@@ -5,6 +5,9 @@ server:
 
 selected_module:
   TTS: EchoTTS
+  # TTS: EdgeTTS
+  # TTS: Doubao
+  # TTS: DoubaoTTS   # alias of Doubao
 
 TTS:
   EchoTTS:
@@ -21,6 +24,36 @@ TTS:
     output_dir: tmp/
     sample_rate: 16000
     frame_duration_ms: 60
+  Doubao:
+    type: doubao
+    api_url: https://openspeech.bytedance.com/api/v1/tts
+    voice: BV001_streaming
+    format: wav
+    authorization: "Bearer;"
+    appid: ""
+    access_token: ""
+    cluster: volcano_tts
+    speed_ratio: 1.0
+    volume_ratio: 1.0
+    pitch_ratio: 1.0
+    sample_rate: 16000
+    frame_duration_ms: 60
+    output_dir: tmp/
+  DoubaoTTS:
+    type: doubao
+    api_url: https://openspeech.bytedance.com/api/v1/tts
+    voice: BV001_streaming
+    format: wav
+    authorization: "Bearer;"
+    appid: ""
+    access_token: ""
+    cluster: volcano_tts
+    speed_ratio: 1.0
+    volume_ratio: 1.0
+    pitch_ratio: 1.0
+    sample_rate: 16000
+    frame_duration_ms: 60
+    output_dir: tmp/
 
 frame_duration_ms: 60
 # Push decoded TTS PCM to preprocess for AEC (preprocess applies only if client aec=true)

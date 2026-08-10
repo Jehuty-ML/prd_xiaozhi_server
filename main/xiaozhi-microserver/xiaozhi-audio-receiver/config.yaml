@@ -5,6 +5,9 @@ server:
 
 selected_module:
   ASR: StubASR
+  # ASR: FunASR
+  # ASR: Doubao
+  # ASR: DoubaoASR   # alias of Doubao (manager-api / monolith name)
 
 ASR:
   StubASR:
@@ -14,8 +17,31 @@ ASR:
   OpenAICompatASR:
     type: openai
     model_name: whisper-1
-    # OpenAI-compatible transcription endpoint (multipart file upload)
     url: https://api.openai.com/v1/audio/transcriptions
     api_key: ""
     language: zh
+    output_dir: tmp/
+  FunASR:
+    type: fun_local
+    # Relative to xiaozhi-server models/ (optional: pip install -r requirements-funasr.txt)
+    model_dir: ../../xiaozhi-server/models/SenseVoiceSmall
+    language: auto
+    output_dir: tmp/
+  # Preferred short name
+  Doubao:
+    type: doubao
+    appid: ""
+    access_token: ""
+    cluster: volcengine_input_common
+    boosting_table_name: ""
+    correct_table_name: ""
+    output_dir: tmp/
+  # Monolith / manager-api compatible alias (mirrored by model-admin if needed)
+  DoubaoASR:
+    type: doubao
+    appid: ""
+    access_token: ""
+    cluster: volcengine_input_common
+    boosting_table_name: ""
+    correct_table_name: ""
     output_dir: tmp/

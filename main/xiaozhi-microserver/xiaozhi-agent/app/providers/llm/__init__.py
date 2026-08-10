@@ -173,8 +173,19 @@ class OpenAICompatLLM(LLMProviderBase):
 
 
 def create_llm(config: dict[str, Any], selected_name: str | None = None) -> LLMProviderBase:
-    selected = selected_name or (config.get("selected_module") or {}).get("LLM") or "EchoLLM"
-    block = (config.get("LLM") or {}).get(selected) or {"type": "echo"}
+    try:
+        from xiaozhi_common.provider_aliases import resolve_block
+
+        selected, _key, block = resolve_block(config, "LLM", selected_name)
+    except ImportError:
+        selected = (
+            selected_name
+            or (config.get("selected_module") or {}).get("LLM")
+            or "EchoLLM"
+        )
+        block = (config.get("LLM") or {}).get(selected) or {"type": "echo"}
+    if not block:
+        block = {"type": "echo"}
     llm_type = str(block.get("type") or "echo").lower()
     if llm_type in ("openai", "openai_compat", "openai-compat"):
         api_key = (block.get("api_key") or "").strip()
