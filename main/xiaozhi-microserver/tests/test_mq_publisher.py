@@ -22,6 +22,12 @@ def test_report_enabled_false_disables_mq():
     assert s.enabled is False
 
 
+def test_unit_test_env_disables_mq(monkeypatch):
+    monkeypatch.setenv("XIAOZHI_UNIT_TEST", "1")
+    s = load_rabbitmq_settings({"rabbitmq": {"enabled": True}})
+    assert s.enabled is False
+
+
 def test_publish_noop_when_disabled():
     pub = ChatHistoryPublisher.from_config({"rabbitmq": {"enabled": False}})
     assert pub.publish(
@@ -29,7 +35,8 @@ def test_publish_noop_when_disabled():
     ) is False
 
 
-def test_publish_payload_shape():
+def test_publish_payload_shape(monkeypatch):
+    monkeypatch.delenv("XIAOZHI_UNIT_TEST", raising=False)
     pub = ChatHistoryPublisher.from_config(
         {
             "rabbitmq": {

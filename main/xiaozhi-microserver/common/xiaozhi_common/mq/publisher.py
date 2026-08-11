@@ -61,7 +61,11 @@ class ChatHistoryPublisher:
             virtual_host=self.settings.virtual_host,
             credentials=creds,
             heartbeat=30,
-            blocked_connection_timeout=30,
+            blocked_connection_timeout=5,
+            socket_timeout=2,
+            connection_attempts=1,
+            retry_delay=0,
+            stack_timeout=5,
         )
         self._connection = pika.BlockingConnection(params)
         self._channel = self._connection.channel()

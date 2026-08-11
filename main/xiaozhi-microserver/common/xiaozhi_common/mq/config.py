@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -25,6 +26,9 @@ def load_rabbitmq_settings(config: dict[str, Any] | None) -> RabbitMqSettings:
     enabled = bool(block.get("enabled", False))
     chat = cfg.get("chat_history") or {}
     if isinstance(chat, dict) and chat.get("report_enabled") is False:
+        enabled = False
+    # Unit-test / CI marker: never attempt a live broker connection.
+    if os.environ.get("XIAOZHI_UNIT_TEST", "").strip() in ("1", "true", "TRUE", "yes"):
         enabled = False
     return RabbitMqSettings(
         enabled=enabled,

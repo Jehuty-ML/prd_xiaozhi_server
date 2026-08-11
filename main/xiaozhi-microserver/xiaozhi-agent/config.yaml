@@ -85,7 +85,8 @@ plugins:
 tool_call_timeout: 30
 max_tool_depth: 5
 
-# Chat history → RabbitMQ (manager-api consumes). Default off.
+# Chat history → RabbitMQ (manager-api consumes).
+# Compose / 本机联调可开；单元测试会强制关掉，避免 CI 无 broker 时挂死。
 chat_history:
   report_enabled: true
 rabbitmq:

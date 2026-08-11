@@ -49,7 +49,14 @@ def agent_cfg():
     from app.core.config_loader import runtime_config
 
     runtime_config.reload()
-    return runtime_config.data
+    data = dict(runtime_config.data)
+    # CI / unit runs have no broker; never block on 127.0.0.1:5672.
+    data["chat_history"] = {
+        **(data.get("chat_history") or {}),
+        "report_enabled": False,
+    }
+    data["rabbitmq"] = {**(data.get("rabbitmq") or {}), "enabled": False}
+    return data
 
 
 @pytest.fixture()
