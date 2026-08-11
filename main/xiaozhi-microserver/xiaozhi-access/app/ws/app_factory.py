@@ -111,6 +111,10 @@ async def _handle_websocket(pool: GrpcClientPool, websocket: WebSocket) -> None:
 
     # Prefer device-id as routing key when present (matches OTA/device identity).
     bind_id = device_id or client_id
+    # Capture replaced connection's registry slot before bind overwrites meta.
+    prev_session_id = str(
+        (connection_manager.get_meta(bind_id) or {}).get("session_id") or ""
+    )
     previous_ws = connection_manager.bind(
         bind_id,
         websocket,
@@ -119,6 +123,20 @@ async def _handle_websocket(pool: GrpcClientPool, websocket: WebSocket) -> None:
         alias_id=client_id if client_id and client_id != bind_id else "",
     )
     if previous_ws is not None:
+        # Stop old in-flight TTS/LLM without removing sessions (reason != disconnect).
+        # The replaced socket's finally must not Abort(disconnect) or it wipes
+        # this connection's ApplySessionConfig / SpeakSession.
+        try:
+            from app.ws.protocol import _abort_peers
+
+            await _abort_peers(pool, bind_id, reason="replaced")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"reconnect peer abort skipped: {exc}")
+        if prev_session_id and prev_session_id != session_id:
+            try:
+                await gateway_runtime.registry.release(prev_session_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"replaced registry release skipped: {exc}")
         try:
             await previous_ws.close(code=1000, reason="replaced by new connection")
         except Exception:  # noqa: BLE001
@@ -165,13 +183,21 @@ async def _handle_websocket(pool: GrpcClientPool, websocket: WebSocket) -> None:
     except Exception as exc:  # noqa: BLE001
         logger.exception(f"WS error client_id={bind_id}: {exc}")
     finally:
-        # Stop peer TTS/LLM/VAD and drop in-memory sessions for this device.
-        try:
-            from app.ws.protocol import _abort_peers
+        # Only the live primary may Abort(disconnect)/remove peer sessions.
+        # A socket replaced by reconnect already had peers aborted with
+        # reason=replaced; a second disconnect Abort would wipe the new session.
+        if connection_manager.is_active_socket(websocket):
+            try:
+                from app.ws.protocol import _abort_peers
 
-            await _abort_peers(pool, bind_id, reason="disconnect")
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"disconnect peer abort skipped: {exc}")
+                await _abort_peers(pool, bind_id, reason="disconnect")
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"disconnect peer abort skipped: {exc}")
+        else:
+            logger.info(
+                f"WS stale disconnect skip peer abort client_id={bind_id} "
+                f"(replaced by newer connection)"
+            )
         connection_manager.unbind(websocket)
         if acquired:
             await gateway_runtime.registry.release(session_id)

@@ -120,6 +120,14 @@ class ConnectionManager:
     def get_client_id(self, ws: WebSocket) -> Optional[str]:
         return self._by_ws.get(ws)
 
+    def is_active_socket(self, ws: WebSocket) -> bool:
+        """True iff this websocket is still the live primary for its bind id."""
+        with self._lock:
+            client_id = self._by_ws.get(ws)
+            if not client_id:
+                return False
+            return self._by_client.get(client_id) is ws
+
     def get_state(self, client_id: str) -> str:
         resolved = self.resolve_client_id(client_id) or client_id
         if resolved in self._by_client or device_session_store.get(resolved):
