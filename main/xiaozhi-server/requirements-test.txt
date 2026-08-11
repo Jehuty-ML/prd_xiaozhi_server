@@ -5,7 +5,7 @@ prometheus_client==0.21.1
 PyYAML==6.0.2
 aiohttp==3.13.2
 httpx==0.28.1
-requests==2.32.5
+requests==2.34.2
 numpy==1.26.4
 pydub==0.25.1
 opuslib_next==1.1.5
