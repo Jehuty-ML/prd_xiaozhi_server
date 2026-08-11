@@ -16,11 +16,27 @@ ACCESS_ROOT = MICRO_ROOT / "xiaozhi-access"
 AGENT_ROOT = MICRO_ROOT / "xiaozhi-agent"
 
 
-def _ensure_paths(*roots: Path) -> None:
-    for p in roots:
+def _clear_app() -> None:
+    for key in list(sys.modules):
+        if key == "app" or key.startswith("app."):
+            del sys.modules[key]
+
+
+def _pin_paths(*roots: Path, drop: tuple[Path, ...] = ()) -> None:
+    """Put service roots at the front; drop sibling service apps that share `app`."""
+    drop_resolved = {str(p.resolve()) for p in drop}
+    for s in list(sys.path):
+        if s in drop_resolved:
+            try:
+                sys.path.remove(s)
+            except ValueError:
+                pass
+    for p in reversed(roots):
         s = str(p.resolve())
-        if s not in sys.path:
-            sys.path.insert(0, s)
+        if s in sys.path:
+            sys.path.remove(s)
+        sys.path.insert(0, s)
+    _clear_app()
 
 
 def _load_module(name: str, path: Path):
@@ -33,11 +49,7 @@ def _load_module(name: str, path: Path):
 
 
 def test_manager_api_enabled_requires_url_secret():
-    _ensure_paths(COMMON, GENERATED, ACCESS_ROOT)
-    # Avoid colliding with xiaozhi-agent/app
-    for key in list(sys.modules):
-        if key == "app" or key.startswith("app."):
-            del sys.modules[key]
+    _pin_paths(COMMON, GENERATED, ACCESS_ROOT, drop=(AGENT_ROOT,))
     from app.ws.device_bind import manager_api_enabled
 
     assert not manager_api_enabled(
@@ -55,10 +67,7 @@ def test_manager_api_enabled_requires_url_secret():
 
 
 def test_fetch_agent_models_need_bind():
-    _ensure_paths(COMMON, GENERATED, ACCESS_ROOT)
-    for key in list(sys.modules):
-        if key == "app" or key.startswith("app."):
-            del sys.modules[key]
+    _pin_paths(COMMON, GENERATED, ACCESS_ROOT, drop=(AGENT_ROOT,))
     from app.ws.device_bind import DeviceBindNeeded, fetch_agent_models_sync
 
     class FakeResp:
@@ -91,14 +100,7 @@ def test_fetch_agent_models_need_bind():
 
 
 def test_apply_session_config_creates_llm_session():
-    for key in list(sys.modules):
-        if key == "app" or key.startswith("app."):
-            del sys.modules[key]
-    # Prefer agent app package over access.
-    access = str(ACCESS_ROOT.resolve())
-    if access in sys.path:
-        sys.path.remove(access)
-    _ensure_paths(COMMON, GENERATED, AGENT_ROOT)
+    _pin_paths(COMMON, GENERATED, AGENT_ROOT, drop=(ACCESS_ROOT,))
 
     from xiaozhi_common.admin_config import deep_merge
     from xiaozhi_common.provider_aliases import mirror_provider_aliases
@@ -142,18 +144,7 @@ def test_apply_session_config_creates_llm_session():
 
 
 def test_slice_provider_config_for_receiver():
-    _ensure_paths(COMMON, GENERATED, ACCESS_ROOT)
-    # Prefer access app over agent (previous test may have pinned agent).
-    agent = str(AGENT_ROOT.resolve())
-    if agent in sys.path:
-        sys.path.remove(agent)
-    access = str(ACCESS_ROOT.resolve())
-    if access in sys.path:
-        sys.path.remove(access)
-    sys.path.insert(0, access)
-    for key in list(sys.modules):
-        if key == "app" or key.startswith("app."):
-            del sys.modules[key]
+    _pin_paths(COMMON, GENERATED, ACCESS_ROOT, drop=(AGENT_ROOT,))
     from app.ws.device_bind import _slice_provider_config
 
     private = {
@@ -180,17 +171,7 @@ def test_slice_provider_config_for_receiver():
 
 
 def test_push_peer_skips_placeholder_asr_credentials():
-    _ensure_paths(COMMON, GENERATED, ACCESS_ROOT)
-    agent = str(AGENT_ROOT.resolve())
-    if agent in sys.path:
-        sys.path.remove(agent)
-    access = str(ACCESS_ROOT.resolve())
-    if access in sys.path:
-        sys.path.remove(access)
-    sys.path.insert(0, access)
-    for key in list(sys.modules):
-        if key == "app" or key.startswith("app."):
-            del sys.modules[key]
+    _pin_paths(COMMON, GENERATED, ACCESS_ROOT, drop=(AGENT_ROOT,))
     from app.ws.device_bind import push_peer_provider_config_sync
 
     private = {
@@ -218,7 +199,7 @@ def test_push_peer_skips_placeholder_asr_credentials():
 
 
 def test_apply_remote_preserves_prior_secrets():
-    _ensure_paths(COMMON)
+    _pin_paths(COMMON)
     from xiaozhi_common.runtime_config import ServiceRuntimeConfig
 
     cfg = ServiceRuntimeConfig.__new__(ServiceRuntimeConfig)
