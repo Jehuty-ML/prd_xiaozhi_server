@@ -1,5 +1,7 @@
 # 基于虾哥编译好的固件配置自定义服务器
 
+本分支 OTA 由 **`xiaozhi-control-admin`（:8003）** 提供；WebSocket 由 **`xiaozhi-access`（:8000）** 提供。详见 [ota-upgrade-guide.md](./ota-upgrade-guide.md)。
+
 ## 第1步 确认版本
 烧录虾哥已经编译好的[1.6.1版本以上固件](https://github.com/78/xiaozhi-esp32/releases)
 

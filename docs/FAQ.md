@@ -1,8 +1,10 @@
 # 常见问题 ❓
 
+部署与文档入口：[文档索引](./README.md) · [Deployment.md](./Deployment.md) · [Production.md](./Production.md)。配置路径默认在 `main/xiaozhi-microserver` 各服务下。
+
 ### 1、为什么我说的话，小智识别出来很多韩文、日文、英文？🇰🇷
 
-建议：检查一下`models/SenseVoiceSmall`是否已经有`model.pt`
+建议：检查一下 `main/xiaozhi-microserver/models/SenseVoiceSmall` 是否已经有 `model.pt`
 文件，如果没有就要下载，查看这里[下载语音识别模型文件](Deployment.md#模型文件)
 
 ### 2、为什么会出现"TTS 任务出错 文件不存在"？📁
@@ -18,8 +20,8 @@ conda install conda-forge::ffmpeg
 
 ### 3、TTS 经常失败，经常超时 ⏰
 
-建议：如果 `EdgeTTS` 经常失败，请先检查是否使用了代理（梯子）。如果使用了，请尝试关闭代理后再试；  
-如果用的是火山引擎的豆包 TTS，经常失败时建议使用付费版本，因为测试版本仅支持 2 个并发。
+建议：如果 `EdgeTTS` 经常失败，请先检查是否使用了代理。若使用了，请尝试关闭代理后再试。  
+本分支 speaker 默认含 Edge / Doubao / Echo；其它 TTS 需自行移植到 `xiaozhi-audio-speaker`。
 
 ### 4、使用Wifi能连接自建服务器，但是4G模式却接不上 🔐
 
@@ -49,60 +51,48 @@ conda install conda-forge::ffmpeg
 
 ### 6、我说话很慢，停顿时小智老是抢话 🗣️
 
-建议：在配置文件中找到如下部分，将 `min_silence_duration_ms` 的值调大（例如改为 `1000`）：
+建议：编辑 `xiaozhi-audio-preprocess/config.yaml`（或智控台下发的 VAD），将 `min_silence_duration_ms` 调大（例如改为 `1000`）：
 
 ```yaml
 VAD:
   SileroVAD:
     threshold: 0.5
-    model_dir: models/snakers4_silero-vad
+    model_dir: ../models/snakers4_silero-vad
     min_silence_duration_ms: 700  # 如果说话停顿较长，可将此值调大
 ```
 
 ### 7、部署相关教程
-1、[如何进行最简化部署](./Deployment.md)<br/>
-2、[如何进行全模块部署](./Deployment_all.md)<br/>
+1、[六微服务部署](./Deployment.md)<br/>
+2、[全模块部署（+ 智控台）](./Deployment_all.md)<br/>
 3、[生产部署（加固 / 探活 / 容量）](./Production.md)<br/>
-4、[如何部署MQTT网关开启MQTT+UDP协议](./mqtt-gateway-integration.md)<br/>
-5、[如何自动拉取本项目最新代码自动编译和启动](./dev-ops-integration.md)<br/>
-6、[如何与Nginx集成](https://github.com/xinnan-tech/xiaozhi-esp32-server/issues/791)<br/>
-7、[修改代码后怎么编译自己的Docker镜像](./docker-build.md)<br/>
+4、[文档索引](./README.md)<br/>
+5、[如何部署MQTT网关开启MQTT+UDP协议](./mqtt-gateway-integration.md)<br/>
+6、[源码自动更新注意（微服务）](./dev-ops-integration.md)<br/>
+7、[如何与Nginx集成](https://github.com/xinnan-tech/xiaozhi-esp32-server/issues/791)<br/>
+8、[修改代码后怎么编译自己的Docker镜像](./docker-build.md)<br/>
 
 ### 8、编译固件相关教程
 1、[如何自己编译小智固件](./firmware-build.md)<br/>
 2、[如何基于虾哥编译好的固件修改OTA地址](./firmware-setting.md)<br/>
-3、[单模块部署如何配置固件OTA自动升级](./ota-upgrade-guide.md)<br/>
+3、[本分支 OTA（control-admin）](./ota-upgrade-guide.md)<br/>
 
 ### 9、拓展相关教程
 1、[如何开启手机号码注册智控台](./ali-sms-integration.md)<br/>
-2、[如何集成HomeAssistant实现智能家居控制](./homeassistant-integration.md)<br/>
-3、[如何开启视觉模型实现拍照识物](./mcp-vision-integration.md)<br/>
-4、[如何部署MCP接入点](./mcp-endpoint-enable.md)<br/>
-5、[如何接入MCP接入点](./mcp-endpoint-integration.md)<br/>
-6、[MCP方法如何获取设备信息](./mcp-get-device-info.md)<br/>
-7、[如何开启声纹识别](./voiceprint-integration.md)<br/>
-8、[新闻插件源配置指南](./newsnow_plugin_config.md)<br/>
-9、[知识库ragflow集成指南](./ragflow-integration.md)<br/>
-10、[如何部署上下文源](./context-provider-integration.md)<br/>
-11、[如何集成PowerMem智能记忆](./powermem-integration.md)<br/>
-12、[如何配置天气插件查询天气](./weather-integration.md)<br/>
-13、[如何开启设备呼叫插件](./device-call-guide.md)<br/>
-14、[如何开启联网搜索功能](./web-search-integration.md)<br/>
+2、[视觉接口（control-admin，推理仍为 stub）](./mcp-vision-integration.md)<br/>
+3、[天气插件 get_weather](./weather-integration.md)<br/>
+4、[MQTT 网关接入](./mqtt-gateway-integration.md)<br/>
+
+Home Assistant、声纹、RAGFlow、PowerMem、MCP 接入点、联网搜索、NewsNow、设备呼叫、本地克隆 TTS 等：**本分支 microserver 暂无对应实现**，文档已删除；见单体 [`main`](https://github.com/Jehuty-ML/prd_xiaozhi_server/tree/main) 或上游。
 
 ### 10、数字人相关教程
 1、[数字人digital-human启动方法](./digital-human-wakeword.md)<br/>
 2、[如何在N100迷你主机上部署数字人digital-human](./all-in-one-digital-human-setup.md)<br/>
 
-### 11、语音克隆、本地语音部署相关教程
-1、[如何在智控台克隆音色](./huoshan-streamTTS-voice-cloning.md)<br/>
-2、[如何部署集成index-tts本地语音](./index-stream-integration.md)<br/>
-3、[如何部署集成fish-speech本地语音](./fish-speech-integration.md)<br/>
-4、[如何部署集成PaddleSpeech本地语音](./paddlespeech-deploy.md)<br/>
+### 11、联调与测试
+1、`cd main/xiaozhi-microserver && python scripts/run_tests.py --unit-only`<br/>
+2、服务启动后：`scripts/*_smoke.py`<br/>
+3、[定期公开测试结果（上游）](https://github.com/xinnan-tech/xiaozhi-performance-research)<br/>
 
-### 12、性能测试教程
-1、[各组件速度测试指南](./performance_tester.md)<br/>
-2、[定期公开测试结果](https://github.com/xinnan-tech/xiaozhi-performance-research)<br/>
-
-### 13、更多问题，可联系我们反馈 💬
+### 12、更多问题，可联系我们反馈 💬
 
 可以在[issues](https://github.com/xinnan-tech/xiaozhi-esp32-server/issues)提交您的问题。

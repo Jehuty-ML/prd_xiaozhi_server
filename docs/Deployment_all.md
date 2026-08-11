@@ -1,4 +1,7 @@
 ﻿# 部署架构图
+
+> **本分支**：全模块 = 六微服务 + 智控台。见 [文档索引](./README.md)、[Production.md](./Production.md)、[Deployment.md](./Deployment.md)。
+
 ![请参考-全模块安装架构图](../docs/images/deploy2.png)
 
 > 生产部署（开箱 compose / 探活 / 容量）：见 [Production.md](./Production.md)
@@ -74,7 +77,15 @@ xiaozhi-microserver
 在页面的右侧找到名称为`RAW`按钮，在`RAW`按钮的旁边，找到下载的图标，点击下载按钮，下载`docker-compose_all.yml`文件。 把文件下载到你的
 `xiaozhi-microserver`中。
 
-或者直接执行 `wget https://raw.githubusercontent.com/xinnan-tech/xiaozhi-esp32-server/refs/heads/main/main/xiaozhi-microserver/docker-compose_all.yml` 下载。
+或者直接从**本仓库本分支**复制：
+
+```bash
+# 在已 clone 的仓库内
+cp main/xiaozhi-microserver/docker-compose_all.yml ./
+# 或
+curl -fsSL -o docker-compose_all.yml \
+  https://raw.githubusercontent.com/Jehuty-ML/prd_xiaozhi_server/Microservices_architecture/main/xiaozhi-microserver/docker-compose_all.yml
+```
 
 下载完后，回到本教程继续往下。
 
@@ -85,7 +96,20 @@ xiaozhi-microserver
 在页面的右侧找到名称为`RAW`按钮，在`RAW`按钮的旁边，找到下载的图标，点击下载按钮，下载`config_from_api.yaml`文件。 把文件下载到你的
 `xiaozhi-microserver`下面的`data`文件夹中，然后把`config_from_api.yaml`文件重命名为`.config.yaml`。
 
-或者直接执行 `wget https://raw.githubusercontent.com/xinnan-tech/xiaozhi-esp32-server/refs/heads/main/main/xiaozhi-microserver/xiaozhi-control-admin/config_from_api.yaml` 下载保存。
+推荐从本仓库复制，并放到 **control-admin** 数据目录（全模块 compose 挂载路径以 yml 为准；源码开发常用）：
+
+```bash
+mkdir -p main/xiaozhi-microserver/xiaozhi-control-admin/data
+cp main/xiaozhi-microserver/xiaozhi-control-admin/config_from_api.yaml \
+  main/xiaozhi-microserver/xiaozhi-control-admin/data/.config.yaml
+```
+
+或：
+
+```bash
+curl -fsSL -o .config.yaml \
+  https://raw.githubusercontent.com/Jehuty-ML/prd_xiaozhi_server/Microservices_architecture/main/xiaozhi-microserver/xiaozhi-control-admin/config_from_api.yaml
+```
 
 下载完配置文件后，我们确认一下整个`xiaozhi-microserver`里面的文件如下所示：
 

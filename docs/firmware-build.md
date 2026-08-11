@@ -1,8 +1,10 @@
 # esp32固件编译
 
+固件侧项目见 [xiaozhi-esp32](https://github.com/78/xiaozhi-esp32)。本仓库后端 OTA 地址填 **`xiaozhi-control-admin` 的 `/xiaozhi/ota/`**（默认 `:8003`），WebSocket 为 access `:8000`。
+
 ## 第1步 准备你的ota地址
 
-如果你，使用的是本项目0.3.12版本，不管是简单Server部署还是全模块部署，都会有ota地址。
+全模块或仅六服务部署后，都会有 OTA 地址（control-admin）。
 
 由于简单Server部署和全模块部署的OTA地址设置方式不一样，请你选择下面的具体方式：
 

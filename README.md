@@ -48,6 +48,7 @@ git checkout main
 | 文档 | 用途 |
 |------|------|
 | [生产部署](./docs/Production.md) | 上线必做、探活、容量 |
+| [文档索引 `docs/`](./docs/README.md) | 哪些文档适用本分支 |
 | [技术说明 `main/`](./main/README.md) | 架构与组件拆解 |
 | [微服务 README](./main/xiaozhi-microserver/README.md) | 六服务职责、本地启动、配置 |
 | [六服务部署](./docs/Deployment.md) / [全模块部署](./docs/Deployment_all.md) | 安装步骤 |
@@ -87,7 +88,7 @@ main/
 
 设备侧常用地址：WebSocket `ws://host:8000/xiaozhi/v1/`，OTA `http://host:8003/xiaozhi/ota/`。
 
-语音交互、多 Provider、插件 / MCP / IoT、智控台、OTA、声纹与知识库等业务能力均予保留。
+语音交互、多 Provider、agent 插件（如天气 / 时间）、设备 MCP / IoT、智控台、OTA 等业务能力按本分支实现保留；声纹、RAG、MCP 接入点、Home Assistant 等上游能力若未移植到 microserver，见单体分支。
 
 ---
 
