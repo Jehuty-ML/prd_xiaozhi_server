@@ -1,8 +1,60 @@
 # xiaozhi-esp32-server · 生产加固分支
 
-> **先选架构，再部署。** 本仓库在生产加固基线之上提供两套运行时：当前 **`main` 即为单体架构**；另有微服务分支。请按实际规模与运维能力选用，**不必默认上微服务**。
+为本开源智能硬件项目 [xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) 提供可自托管的后端服务：设备通过 WebSocket / MQTT+UDP 接入，完成「听 → 想 → 说」全链路语音交互，并配套智控台做设备与模型管理。
+
+本仓库在上游 [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) 功能基线之上做**生产加固**（连接治理、可观测、安全默认、依赖韧性等）。**业务能力与上游一致**；下文只交代「这是什么、能做什么」，详细功能说明、Provider 全家桶、演示视频与社区发行说明请直接看原版仓库。
+
+---
+
+## 系统简介
+
+小智是一套 **ESP32 端侧固件 + 后端服务** 的 AI 语音助手生态：
+
+| 角色 | 仓库 | 做什么 |
+|------|------|--------|
+| 设备固件 | [78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) | 唤醒、拾音、播放、屏显、MCP/IoT 控制 |
+| 后端服务（本仓库上游） | [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) | ASR / LLM / TTS、智控台、OTA、插件与多 Provider |
+| 本仓库 | 当前分支 | 在上游功能之上，补齐自托管上线所需的生产面 |
+
+**适合谁：** 已有 ESP32 小智硬件（或计划烧录官方固件），希望自己搭建后端，而不是只用官方 `xiaozhi.me`；需要对接 [小智通信协议](https://ccnphfhqs21z.feishu.cn/wiki/M0XiwldO9iJwHikpXD5cEx71nKh)，用 Python 对话网关 + Java 智控台 + Vue 前端跑通全链路。
+
+**技术栈一览：**
+
+```
+设备 (ESP32)  ──WebSocket / MQTT+UDP──►  xiaozhi-server（对话网关）
+                                              │
+                         ASR / VAD / LLM / VLLM / TTS / 意图 / 记忆 / 插件
+                                              │
+                                    manager-api + manager-web（智控台）
+```
+
+---
+
+## 已支持能力（概览）
+
+与上游功能基线一致，主要包括：
+
+| 模块 | 能力 |
+|------|------|
+| 接入与协议 | WebSocket、MQTT+UDP；OTA；设备认证与多实例发现 |
+| 语音交互 | 流式 ASR、VAD、流式 TTS；实时打断；多语言识别 |
+| 智能对话 | 多 LLM / VLLM；短期记忆；意图识别 / Function Call |
+| 工具与扩展 | 设备端 / 云端 MCP、IoT、插件热加载、MCP 接入点 |
+| 声纹与知识库 | 多用户声纹识别；RAGFlow 等知识库 |
+| 管理面 | Web / 移动智控台：用户、设备、智能体、模型与系统配置 |
+
+更细的 Provider 列表（ASR / LLM / TTS / Memory / Intent / RAG 等）、入门全免费 vs 流式推荐配置、演示视频与部署教程，请查看：
+
+- 上游服务端：[xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server)（功能清单、组件对照表、部署与 FAQ）
+- 设备固件：[78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32)（硬件能力、唤醒、MCP、板型与烧录）
+
+本文后续章节只描述 **本分支与上游的差异**（架构选用、生产加固、上线自检）。
+
+---
 
 ## 架构选用（必读）
+
+> **先选架构，再部署。** 本仓库在生产加固基线之上提供两套运行时：当前 **`main` 即为单体架构**；另有微服务分支。请按实际规模与运维能力选用，**不必默认上微服务**。
 
 | 分支 | 运行时 | 适合谁 | 代价 / 收益 |
 |------|--------|--------|-------------|
