@@ -13,20 +13,43 @@
 </p>
 
 <p align="center">
+  <a href="#30-秒-quick-start">Quick Start</a> ·
   <a href="#一眼看懂">一眼看懂</a> ·
-  <a href="#适合谁">适合谁</a> ·
-  <a href="#效果一览">效果一览</a> ·
-  <a href="#架构选用必读">选架构</a> ·
+  <a href="#本分支-vs-上游">vs 上游</a> ·
+  <a href="#智控台一览">智控台</a> ·
+  <a href="#效果一览">效果</a> ·
   <a href="#开箱部署">部署</a> ·
-  <a href="#文档导航">文档</a>
+  <a href="./README_en.md">English</a>
 </p>
 
 <p align="center">
+  <a href="./README.md"><img alt="简体中文" src="https://img.shields.io/badge/简体中文-DFE0E5"/></a>
+  <a href="./README_en.md"><img alt="English" src="https://img.shields.io/badge/English-DBEDFA"/></a>
   <img alt="Python" src="https://img.shields.io/badge/Python-对话网关-3776AB?logo=python&logoColor=white"/>
   <img alt="Java" src="https://img.shields.io/badge/Java-智控台_API-ED8B00?logo=openjdk&logoColor=white"/>
   <img alt="Vue" src="https://img.shields.io/badge/Vue-智控台_Web-4FC08D?logo=vue.js&logoColor=white"/>
   <img alt="License" src="https://img.shields.io/badge/License-MIT-blue"/>
 </p>
+
+---
+
+## 30 秒 Quick Start
+
+> 默认 development，**不要**直接对公网暴露。生产开关见 [Production.md](./docs/Production.md)。
+
+`ash
+git clone https://github.com/Jehuty-ML/prd_xiaozhi_server.git
+cd prd_xiaozhi_server/main/xiaozhi-server
+cp .env.example .env   # 修改 MYSQL_ROOT_PASSWORD 等密钥
+
+# 仅对话 Server（最快跑通）
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+# 自检
+curl -sS http://127.0.0.1:8003/health
+`
+
+全模块（智控台 + MySQL + Redis）用 docker-compose_all.yml + docker-compose_all.prod.yml。详情：[开箱部署](#开箱部署)。
 
 ---
 
@@ -45,6 +68,33 @@
 
 **和上游的关系（一句话）：**  
 业务能力与 [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) 对齐；本分支专注把「能演示」变成「可自托管上线」。Provider 全家桶、演示视频与社区发行说明仍以上游为准。
+
+---
+
+## 本分支 vs 上游
+
+<p align="center">
+  <img src="docs/images/vs-upstream.svg" alt="本分支与上游差异对比" width="100%"/>
+</p>
+
+| 维度 | 上游功能基线 | 本分支 |
+|------|-------------|--------|
+| 定位 | 演示与自建联调 | **可上线的自托管生产面** |
+| 连接 | 基本无限接纳 | 全局 / 单设备硬上限 |
+| 可观测 | 偏日志 | /health /ready /metrics |
+| 安全 | 偏联调友好 | production 强制 auth |
+| 依赖故障 | 易直接暴露给设备 | 超时 / 重试 / 熔断 / 降级 |
+
+---
+
+## 智控台一览
+
+<p align="center">
+  <img src="docs/images/console-devices.png" alt="设备管理" width="48%"/>
+  <img src="docs/images/console-models.png" alt="模型配置" width="48%"/>
+</p>
+
+<p align="center"><em>左：设备管理（来自产品界面）；右：模型配置示意</em></p>
 
 ---
 
@@ -71,6 +121,11 @@
 ## 效果一览
 
 硬件端是「能说话的 IoT 助手」，不是单一演示板：自定义音色、多语言、设备间通话、复杂场景联动等都在生态里跑通过。
+
+<p align="center">
+  <img src="docs/images/demo-flow.gif" alt="听想说链路示意动画" width="80%"/>
+</p>
+<p align="center"><em>听 → 想 → 说 链路示意（动画）。实机录屏请看上游演示视频。</em></p>
 
 <p align="center">
   <img src="docs/images/demo2.png" alt="自定义音色" width="32%"/>
@@ -235,6 +290,9 @@ python scripts/production_verify.py
 | [改造细则 `xiaozhi-server/`](./main/xiaozhi-server/README.md) | 配置、指标、验证 |
 | [仅 Server 部署](./docs/Deployment.md) / [全模块部署](./docs/Deployment_all.md) | 安装步骤 |
 | [FAQ](./docs/FAQ.md) | 常见问题 |
+| [English README](./README_en.md) | English overview |
+| [GitHub 仓库元信息](./docs/github-repo-meta.md) | Description / Topics / Social Preview 设置说明 |
+| [Social Preview 图](./docs/images/social-preview.png) | 1280×640，上传到仓库 Settings → Social preview |
 
 ---
 

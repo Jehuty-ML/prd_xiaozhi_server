@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 360" role="img" aria-label="本分支 vs 上游对比">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B3D91"/>
+      <stop offset="100%" stop-color="#1E88E5"/>
+    </linearGradient>
+  </defs>
+  <rect width="960" height="360" rx="20" fill="url(#bg)"/>
+  <text x="40" y="44" fill="#E3F2FD" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="16" font-weight="600">本分支 vs 上游（一眼看差异）</text>
+  <text x="40" y="74" fill="#FFFFFF" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="22" font-weight="700">业务能力对齐上游；本分支补齐自托管生产面</text>
+  <rect x="40" y="110" width="420" height="210" rx="16" fill="#FFFFFF"/>
+  <text x="250" y="148" text-anchor="middle" fill="#546E7A" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="16" font-weight="700">上游功能基线</text>
+  <text x="70" y="186" fill="#37474F" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">• 听 → 想 → 说 全链路可用</text>
+  <text x="70" y="214" fill="#37474F" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">• 多 Provider / 插件 / 智控台</text>
+  <text x="70" y="242" fill="#37474F" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">• 便于演示与自建联调</text>
+  <text x="70" y="280" fill="#90A4AE" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13">默认更偏开发友好</text>
+  <rect x="500" y="110" width="420" height="210" rx="16" fill="#FFF8E1"/>
+  <text x="710" y="148" text-anchor="middle" fill="#F57F17" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="16" font-weight="700">本分支 · 生产加固</text>
+  <text x="530" y="186" fill="#5D4037" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">• 连接硬上限 / 幂等回收</text>
+  <text x="530" y="214" fill="#5D4037" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">• /health · /ready · /metrics</text>
+  <text x="530" y="242" fill="#5D4037" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">• production 强制 auth · 禁 query token</text>
+  <text x="530" y="270" fill="#5D4037" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">• 超时 / 重试 / 熔断 / 降级话术</text>
+  <text x="530" y="298" fill="#8D6E63" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13">面向可上线的自托管</text>
+</svg>
