@@ -90,11 +90,13 @@ curl -sS http://127.0.0.1:8003/health
 ## 智控台一览
 
 <p align="center">
-  <img src="docs/images/console-devices.png" alt="设备管理" width="48%"/>
-  <img src="docs/images/console-models.png" alt="模型配置" width="48%"/>
+  <img src="docs/images/banner1.png" alt="智控台：智能体 / 设备管理" width="100%"/>
+</p>
+<p align="center">
+  <img src="docs/images/console-params.png" alt="智控台：参数管理（按前缀聚合）" width="100%"/>
 </p>
 
-<p align="center"><em>左：设备管理（来自产品界面）；右：模型配置示意</em></p>
+<p align="center"><em>上：智能体管理；下：参数管理（按命名空间前缀聚合，本分支界面）</em></p>
 
 ---
 
@@ -199,14 +201,6 @@ git checkout Microservices_architecture
 ---
 
 ## 本分支补了什么
-
-<p align="center">
-  <img src="docs/images/hnlg.jpg" alt="华南理工大学" width="420"/>
-</p>
-
-<p align="center">
-  <em>业务能力与工程基础来自开源小智生态；华南理工大学刘思源教授团队主导研发上游服务端。</em>
-</p>
 
 在功能基线（Commit [`de45f73`](https://github.com/xinnan-tech/xiaozhi-esp32-server/commit/de45f73efdd24e9343427a56b5d22f857b6bb7a7)）上，端到端语音交互、智控台、插件与多 Provider 已经可用。作为有状态长连接网关，基线距可上线生产环境仍有差距，例如：
 

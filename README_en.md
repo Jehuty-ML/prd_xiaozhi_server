@@ -78,9 +78,13 @@ Full stack (console + MySQL + Redis): `docker-compose_all.yml` + `docker-compose
 ## Management console
 
 <p align="center">
-  <img src="docs/images/console-devices.png" alt="Device management" width="48%"/>
-  <img src="docs/images/console-models.png" alt="Model config" width="48%"/>
+  <img src="docs/images/banner1.png" alt="Management console: agents / devices" width="100%"/>
 </p>
+<p align="center">
+  <img src="docs/images/console-params.png" alt="Parameter management with prefix grouping" width="100%"/>
+</p>
+
+<p align="center"><em>Top: agent management; bottom: parameter management (grouped by namespace prefix).</em></p>
 
 ---
 
