@@ -1,22 +1,60 @@
-# xiaozhi-esp32-server · 生产加固分支
+<p align="center">
+  <a href="https://github.com/Jehuty-ML/prd_xiaozhi_server">
+    <img src="docs/images/banner1.png" alt="xiaozhi-esp32-server" width="100%"/>
+  </a>
+</p>
 
-为本开源智能硬件项目 [xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) 提供可自托管的后端服务：设备通过 WebSocket / MQTT+UDP 接入，完成「听 → 想 → 说」全链路语音交互，并配套智控台做设备与模型管理。
+<h1 align="center">xiaozhi-esp32-server · 生产加固分支</h1>
 
-本仓库在上游 [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) 功能基线之上做**生产加固**（连接治理、可观测、安全默认、依赖韧性等）。**业务能力与上游一致**；下文只交代「这是什么、能做什么」，详细功能说明、Provider 全家桶、演示视频与社区发行说明请直接看原版仓库。
+<p align="center">
+  <strong>给 ESP32「小智」硬件用的自托管后端</strong><br/>
+  设备负责说人话，本仓库负责「听 → 想 → 说」全链路，并提供智控台管理设备与模型。<br/>
+  在上游开源功能基线上，补齐连接治理、可观测、安全默认与依赖韧性，方便真正上线自托管。
+</p>
+
+<p align="center">
+  <a href="#一眼看懂">一眼看懂</a> ·
+  <a href="#适合谁">适合谁</a> ·
+  <a href="#效果一览">效果一览</a> ·
+  <a href="#架构选用必读">选架构</a> ·
+  <a href="#开箱部署">部署</a> ·
+  <a href="#文档导航">文档</a>
+</p>
+
+<p align="center">
+  <img alt="Python" src="https://img.shields.io/badge/Python-对话网关-3776AB?logo=python&logoColor=white"/>
+  <img alt="Java" src="https://img.shields.io/badge/Java-智控台_API-ED8B00?logo=openjdk&logoColor=white"/>
+  <img alt="Vue" src="https://img.shields.io/badge/Vue-智控台_Web-4FC08D?logo=vue.js&logoColor=white"/>
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-blue"/>
+</p>
 
 ---
 
-## 系统简介
+## 一眼看懂
 
-小智是一套 **ESP32 端侧固件 + 后端服务** 的 AI 语音助手生态：
+<p align="center">
+  <img src="docs/images/overview.svg" alt="系统总览：设备 → 听想说 → 智控台" width="100%"/>
+</p>
 
-| 角色 | 仓库 | 做什么 |
-|------|------|--------|
-| 设备固件 | [78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) | 唤醒、拾音、播放、屏显、MCP/IoT 控制 |
-| 后端服务（本仓库上游） | [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) | ASR / LLM / TTS、智控台、OTA、插件与多 Provider |
-| 本仓库 | 当前分支 | 在上游功能之上，补齐自托管上线所需的生产面 |
+| 你看到的 | 实际是什么 |
+|----------|------------|
+| 桌上的 ESP32 小设备会聊天、控灯、打电话 | 固件仓库 [78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) |
+| 设备背后的「大脑」：识别语音、调用大模型、合成回复 | **本仓库**对话网关 `xiaozhi-server` |
+| 浏览器里管设备、角色、模型、OTA | 智控台 `manager-web` + `manager-api` |
+| 和官方 `xiaozhi.me` 的差别 | 数据与密钥留在你自己的服务器上 |
 
-**适合谁：** 已有 ESP32 小智硬件（或计划烧录官方固件），希望自己搭建后端，而不是只用官方 `xiaozhi.me`；需要对接 [小智通信协议](https://ccnphfhqs21z.feishu.cn/wiki/M0XiwldO9iJwHikpXD5cEx71nKh)，用 Python 对话网关 + Java 智控台 + Vue 前端跑通全链路。
+**和上游的关系（一句话）：**  
+业务能力与 [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) 对齐；本分支专注把「能演示」变成「可自托管上线」。Provider 全家桶、演示视频与社区发行说明仍以上游为准。
+
+---
+
+## 适合谁
+
+| ✅ 适合 | ❌ 不太适合 |
+|--------|------------|
+| 已有 / 打算烧录官方小智固件，想自己搭后端 | 只想用官方云、不想运维服务器 |
+| 需要按 [小智通信协议](https://ccnphfhqs21z.feishu.cn/wiki/M0XiwldO9iJwHikpXD5cEx71nKh) 对接 WebSocket / MQTT+UDP | 寻找纯 App / 纯网页聊天机器人（无硬件） |
+| 关心连接上限、探活、指标、安全默认等生产面 | 只想本地玩一下、对稳定性无要求（直接用上游即可） |
 
 **技术栈一览：**
 
@@ -27,6 +65,24 @@
                                               │
                                     manager-api + manager-web（智控台）
 ```
+
+---
+
+## 效果一览
+
+硬件端是「能说话的 IoT 助手」，不是单一演示板：自定义音色、多语言、设备间通话、复杂场景联动等都在生态里跑通过。
+
+<p align="center">
+  <img src="docs/images/demo2.png" alt="自定义音色" width="32%"/>
+  <img src="docs/images/demo3.png" alt="粤语交流" width="32%"/>
+  <img src="docs/images/demo0.png" alt="设备间打电话" width="32%"/>
+</p>
+<p align="center">
+  <img src="docs/images/demo1.png" alt="复杂医疗场景" width="32%"/>
+  <img src="docs/images/banner2.png" alt="从自制到落地" width="65%"/>
+</p>
+
+想看完整演示视频与更多场景，请前往上游仓库的 [效果展示区](https://github.com/xinnan-tech/xiaozhi-esp32-server#%E9%80%82%E7%94%A8%E4%BA%BA%E7%BE%A4-)。
 
 ---
 
@@ -43,23 +99,29 @@
 | 声纹与知识库 | 多用户声纹识别；RAGFlow 等知识库 |
 | 管理面 | Web / 移动智控台：用户、设备、智能体、模型与系统配置 |
 
-更细的 Provider 列表（ASR / LLM / TTS / Memory / Intent / RAG 等）、入门全免费 vs 流式推荐配置、演示视频与部署教程，请查看：
+全模块安装时的组件关系：
 
-- 上游服务端：[xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server)（功能清单、组件对照表、部署与 FAQ）
-- 设备固件：[78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32)（硬件能力、唤醒、MCP、板型与烧录）
+<p align="center">
+  <img src="docs/images/deploy2.png" alt="全模块安装架构图" width="100%"/>
+</p>
 
-本文后续章节只描述 **本分支与上游的差异**（架构选用、生产加固、上线自检）。
+更细的 Provider 列表、入门全免费 vs 流式推荐配置、部署教程：
+
+- 上游服务端：[xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server)
+- 设备固件：[78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32)
+
+下文只描述 **本分支与上游的差异**（架构选用、生产加固、上线自检）。
 
 ---
 
 ## 架构选用（必读）
 
-> **先选架构，再部署。** 本仓库在生产加固基线之上提供两套运行时：当前 **`main` 即为单体架构**；另有微服务分支。请按实际规模与运维能力选用，**不必默认上微服务**。
+> **先选架构，再部署。** 当前 **`main` 即为单体架构**；另有微服务分支。请按实际规模与运维能力选用，**不必默认上微服务**。
 
 | 分支 | 运行时 | 适合谁 | 代价 / 收益 |
 |------|--------|--------|-------------|
-| **`main`（当前分支 · 单体）** | `main/xiaozhi-server` | 业务刚起步、设备量不大、希望少人维护 | **部署与排障成本低**；单进程即可跑通全链路。需要扩容时，也可多实例 + 负载均衡，并配合智控台 / Redis 注册做一定程度的横向扩展 |
-| [`Microservices_architecture`](https://github.com/Jehuty-ML/prd_xiaozhi_server/tree/Microservices_architecture) | 六微服务 `main/xiaozhi-microserver` | 高并发接入、要按模块弹性扩容、接入层与 ASR/LLM/TTS 需隔离 | **运维与联调成本更高**（多进程、发现、跨服务契约）；换来的是按瓶颈单独扩 access / receiver / agent / speaker 等，以及更好的故障隔离 |
+| **`main`（当前分支 · 单体）** | `main/xiaozhi-server` | 业务刚起步、设备量不大、希望少人维护 | **部署与排障成本低**；单进程即可跑通全链路。也可多实例 + 负载均衡，配合智控台 / Redis 注册做一定横向扩展 |
+| [`Microservices_architecture`](https://github.com/Jehuty-ML/prd_xiaozhi_server/tree/Microservices_architecture) | 六微服务 `main/xiaozhi-microserver` | 高并发接入、要按模块弹性扩容、接入层与 ASR/LLM/TTS 需隔离 | **运维与联调成本更高**；换来按瓶颈单独扩 access / receiver / agent / speaker，以及更好的故障隔离 |
 
 **怎么选：**
 
@@ -71,21 +133,27 @@
 git checkout Microservices_architecture
 ```
 
-更细的取舍说明见微服务分支内 [`main/xiaozhi-microserver/README.md`](https://github.com/Jehuty-ML/prd_xiaozhi_server/blob/Microservices_architecture/main/xiaozhi-microserver/README.md)。
+更细取舍见微服务分支内 [`main/xiaozhi-microserver/README.md`](https://github.com/Jehuty-ML/prd_xiaozhi_server/blob/Microservices_architecture/main/xiaozhi-microserver/README.md)。
+
+最简部署形态（仅对话 Server）可参考：
+
+<p align="center">
+  <img src="docs/images/deploy1.png" alt="最简化安装架构图" width="90%"/>
+</p>
 
 ---
 
-## 致谢与定位
+## 本分支补了什么
 
-本仓库的业务能力与工程基础，来自开源项目 [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) 及小智生态各方贡献者。
+<p align="center">
+  <img src="docs/images/hnlg.jpg" alt="华南理工大学" width="420"/>
+</p>
 
-特别感谢：
+<p align="center">
+  <em>业务能力与工程基础来自开源小智生态；华南理工大学刘思源教授团队主导研发上游服务端。</em>
+</p>
 
-- **华南理工大学刘思源教授团队**对小智后端服务的主导研发与持续投入  
-- 上游仓库 [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) 的维护者与全体 [代码贡献者](https://github.com/xinnan-tech/xiaozhi-esp32-server/graphs/contributors)  
-- 固件侧 [xiaozhi-esp32](https://github.com/78/xiaozhi-esp32)、[小智通信协议](https://ccnphfhqs21z.feishu.cn/wiki/M0XiwldO9iJwHikpXD5cEx71nKh) 及相关生态项目  
-
-在功能基线（Commit [`de45f73`](https://github.com/xinnan-tech/xiaozhi-esp32-server/commit/de45f73efdd24e9343427a56b5d22f857b6bb7a7)）上，端到端语音交互、智控台、插件与多 Provider 架构已经可用。与此同时，作为有状态长连接网关，基线距可上线的生产环境仍有明显差距，例如：
+在功能基线（Commit [`de45f73`](https://github.com/xinnan-tech/xiaozhi-esp32-server/commit/de45f73efdd24e9343427a56b5d22f857b6bb7a7)）上，端到端语音交互、智控台、插件与多 Provider 已经可用。作为有状态长连接网关，基线距可上线生产环境仍有差距，例如：
 
 - 缺少连接硬上限，突发流量易打满进程  
 - 断线清理不完整、不幂等，存在任务 / 线程 / 队列泄漏风险  
@@ -93,21 +161,7 @@ git checkout Microservices_architecture
 - 安全默认偏联调（auth 可关、白名单免检、query 传 token 等）  
 - 上游依赖缺少统一超时、重试、熔断与设备侧降级  
 
-本分支在上述基线之上做了一系列生产加固，目标态见 Commit [`7519dd5`](https://github.com/xinnan-tech/xiaozhi-esp32-server/commit/7519dd516c79764eb722fe3c25239d6f30f665c8)。技术栈未变（Python 对话网关 + Java 智控台 + Vue 前端）；**补齐的是连接治理、可观测、安全基线与依赖韧性**。
-
-社区发行说明、演示视频与 Provider 全家桶仍以[上游 README](https://github.com/xinnan-tech/xiaozhi-esp32-server) 为准；本文只描述本分支的差异与上线用法。
-
-| 文档 | 用途 |
-|------|------|
-| [生产部署](./docs/Production.md) | 上线必做、探活、容量 |
-| [改造说明 `main/`](./main/README.md) | 基线 → 目标态与架构 |
-| [改造细则 `xiaozhi-server/`](./main/xiaozhi-server/README.md) | 配置、指标、验证 |
-| [仅 Server 部署](./docs/Deployment.md) / [全模块部署](./docs/Deployment_all.md) | 安装步骤 |
-| [FAQ](./docs/FAQ.md) | 常见问题 |
-
----
-
-## 与功能基线的差异
+本分支目标态见 Commit [`7519dd5`](https://github.com/xinnan-tech/xiaozhi-esp32-server/commit/7519dd516c79764eb722fe3c25239d6f30f665c8)。技术栈未变；**补齐的是连接治理、可观测、安全基线与依赖韧性**。
 
 | 维度 | 功能基线（`de45f73`） | 本分支（`7519dd5`） |
 |------|----------------------|---------------------|
@@ -119,8 +173,6 @@ git checkout Microservices_architecture
 | 上游故障 | 易直接暴露给设备 | 超时 / 重试 / 熔断 / 降级话术与预置音 |
 | 多实例 | 静态 websocket 列表 | Redis Dialogue 注册心跳，OTA 优先选存活实例 |
 
-改造摘要：连接准入与确定性回收；会话与 provider 指标；按环境区分的安全策略；ASR/LLM/TTS 韧性与过载背压；Dialogue 多实例发现；探活与单测 CI。细则见 [`main/README.md`](./main/README.md)、[`main/xiaozhi-server/README.md`](./main/xiaozhi-server/README.md)。
-
 ```
 main/
   xiaozhi-server/      单体对话网关（本分支主运行时）:8000 / HTTP:8003
@@ -130,8 +182,6 @@ main/
   digital-human/       数字人联调
   xiaozhi-microserver/ 六微服务代码（以 Microservices_architecture 分支为准）
 ```
-
-语音交互、多 Provider、插件 / MCP / IoT、智控台、OTA、声纹与知识库等业务能力均予保留。
 
 ---
 
@@ -176,6 +226,30 @@ python scripts/production_verify.py
 
 ---
 
+## 文档导航
+
+| 文档 | 用途 |
+|------|------|
+| [生产部署](./docs/Production.md) | 上线必做、探活、容量 |
+| [改造说明 `main/`](./main/README.md) | 基线 → 目标态与架构 |
+| [改造细则 `xiaozhi-server/`](./main/xiaozhi-server/README.md) | 配置、指标、验证 |
+| [仅 Server 部署](./docs/Deployment.md) / [全模块部署](./docs/Deployment_all.md) | 安装步骤 |
+| [FAQ](./docs/FAQ.md) | 常见问题 |
+
+---
+
+## 致谢
+
+特别感谢：
+
+- **华南理工大学刘思源教授团队**对小智后端服务的主导研发与持续投入  
+- 上游仓库 [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) 的维护者与全体 [代码贡献者](https://github.com/xinnan-tech/xiaozhi-esp32-server/graphs/contributors)  
+- 固件侧 [xiaozhi-esp32](https://github.com/78/xiaozhi-esp32)、[小智通信协议](https://ccnphfhqs21z.feishu.cn/wiki/M0XiwldO9iJwHikpXD5cEx71nKh) 及相关生态项目  
+
+社区发行说明、演示视频与 Provider 全家桶仍以[上游 README](https://github.com/xinnan-tech/xiaozhi-esp32-server) 为准。
+
+---
+
 ## 警告
 
 1. 本软件与任何第三方 ASR / LLM / TTS 等服务商无商业合作关系，不为其服务质量或资金安全提供担保；密钥由使用者自行保管。  
@@ -187,6 +261,7 @@ python scripts/production_verify.py
 
 - 许可证：与上游一致（MIT），见 [LICENSE](./LICENSE)  
 - 上游项目：[xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server)  
-- 硬件固件：[78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32)
+- 硬件固件：[78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32)  
+- 本仓库远程：`https://github.com/Jehuty-ML/prd_xiaozhi_server`
 
 改造细则：[`main/xiaozhi-server/README.md`](./main/xiaozhi-server/README.md)。通用安装问题：[FAQ](./docs/FAQ.md)。
