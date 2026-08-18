@@ -364,6 +364,7 @@ export default {
         const keys = sections.map(s => s.key);
         if (!keys.length) {
           this.activeCollapse = [];
+          this.isAllSelected = false;
           return;
         }
         // 分组不多时全部展开；较多时默认展开前几组
@@ -504,37 +505,64 @@ export default {
       this.filteredParams.forEach(row => { row.selected = false; });
       this.syncSelectAllState();
     },
-    fetchParams() {
-      this.loading = true;
-      Api.admin.getParamsList(
-        {
-          page: 1,
-          limit: FETCH_LIMIT,
-          paramCode: ""
-        },
-        ({ data }) => {
-          this.loading = false;
-          if (data.code === 0) {
-            this.allParams = (data.data.list || []).map(item => ({
-              ...item,
-              valueType: item.valueType || "string",
-              selected: false,
-              showValue: false
-            }));
-            // 若当前分类已无数据，回退到全部
-            const exists = this.categoryTabs.some(t => t.key === this.activeCategory);
-            if (!exists) {
-              this.activeCategory = 'all';
-              this.activeSubCategory = 'all';
+    fetchParamsPage(page) {
+      return new Promise((resolve, reject) => {
+        Api.admin.getParamsList(
+          {
+            page,
+            limit: FETCH_LIMIT,
+            paramCode: ""
+          },
+          ({ data }) => {
+            if (data.code === 0) {
+              resolve(data.data || {});
+            } else {
+              reject(new Error(data.msg || this.$t('paramManagement.getParamsListFailed')));
             }
-          } else {
-            this.$message.error({
-              message: data.msg || this.$t('paramManagement.getParamsListFailed'),
-              showClose: true
-            });
           }
+        );
+      });
+    },
+    async fetchParams() {
+      this.loading = true;
+      try {
+        const collected = [];
+        let page = 1;
+        let total = Infinity;
+        // 按 total 循环拉全部分页，避免超过 FETCH_LIMIT 时聚合视图缺数据
+        while (collected.length < total) {
+          const pageData = await this.fetchParamsPage(page);
+          const list = pageData.list || [];
+          total = typeof pageData.total === 'number' ? pageData.total : collected.length + list.length;
+          collected.push(...list);
+          if (!list.length) break;
+          page += 1;
+          // 防御：异常 total / 接口异常时避免死循环
+          if (page > 200) break;
         }
-      );
+
+        this.allParams = collected.map(item => ({
+          ...item,
+          valueType: item.valueType || "string",
+          selected: false,
+          showValue: false
+        }));
+        this.isAllSelected = false;
+
+        // 若当前分类已无数据，回退到全部
+        const exists = this.categoryTabs.some(t => t.key === this.activeCategory);
+        if (!exists) {
+          this.activeCategory = 'all';
+          this.activeSubCategory = 'all';
+        }
+      } catch (err) {
+        this.$message.error({
+          message: (err && err.message) || this.$t('paramManagement.getParamsListFailed'),
+          showClose: true
+        });
+      } finally {
+        this.loading = false;
+      }
     },
     handleSearch() {
       this.appliedSearch = this.searchCode;
