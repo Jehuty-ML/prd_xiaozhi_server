@@ -37,7 +37,7 @@
 
 > 默认 development，**不要**直接对公网暴露。生产开关见 [Production.md](./docs/Production.md)。
 
-`ash
+```bash
 git clone https://github.com/Jehuty-ML/prd_xiaozhi_server.git
 cd prd_xiaozhi_server/main/xiaozhi-server
 cp .env.example .env   # 修改 MYSQL_ROOT_PASSWORD 等密钥
@@ -47,7 +47,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 # 自检
 curl -sS http://127.0.0.1:8003/health
-`
+```
 
 全模块（智控台 + MySQL + Redis）用 docker-compose_all.yml + docker-compose_all.prod.yml。详情：[开箱部署](#开箱部署)。
 
